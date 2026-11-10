@@ -2,8 +2,15 @@
 
 A voice-first wage and work-record platform for India's daily-wage, construction, domestic, and migrant workers. Workers speak naturally in Hindi or Hinglish to log work, record payments, and generate verifiable wage statements — no literacy or manual data entry required.
 
+**Project Links & Documentation:**
+- **Solution Pitch (1-Page Brief):** [SOLUTION_PITCH.md](./SOLUTION_PITCH.md)
+- **Live Frontend App:** [https://majdoormitra.vercel.app](https://majdoormitra.vercel.app)
+- **Live Backend API & Swagger Docs:** [https://majdoormitra-production.up.railway.app/docs](https://majdoormitra-production.up.railway.app/docs)
+- **GitHub Repository:** [https://github.com/dwivedyarvind67/MajdoorMitra](https://github.com/dwivedyarvind67/MajdoorMitra)
+
 ## Table of Contents
 
+- [Solution Pitch](#solution-pitch)
 - [Architecture](#architecture)
 - [Tech Stack](#tech-stack)
 - [Project Structure](#project-structure)

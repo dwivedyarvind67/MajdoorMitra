@@ -12,7 +12,8 @@ import { ExtractionResult, StatementStatus } from '../../types';
 import { ArrowLeft, CheckCircle, Volume2 } from 'lucide-react';
 
 const EDITABLE_FIELDS: (keyof VoiceCorrections)[] = [
-  'intent', 'days_worked', 'daily_wage', 'hours_worked', 'work_date',
+  'intent', 'days_worked', 'daily_wage', 'hours_worked', 'wage_basis',
+  'hourly_rate', 'overtime_hours', 'overtime_multiplier', 'work_date',
   'amount_received', 'payment_type', 'employer_name', 'description',
 ];
 
@@ -155,11 +156,10 @@ export default function VoicePage() {
     }
   };
 
-  const handleConfirm = async (editedData: ExtractionResult) => {
+  const handleReviewChanges = async (editedData: ExtractionResult) => {
     if (!sessionId || !extractedData) return;
     setProcessing(true);
     setPageError(null);
-    clearAudio();
     try {
       const corrections: VoiceCorrections = {};
       for (const field of EDITABLE_FIELDS) {
@@ -174,9 +174,22 @@ export default function VoicePage() {
         setExtractedData(corrected.extracted_data || extractedData);
         setStatus(corrected.status as StatementStatus);
         setQuestion(corrected.question || null);
-        if (corrected.status !== 'READY_FOR_CONFIRMATION') return;
+      } else {
+        setPageError('कोई बदलाव नहीं मिला। बदले हुए अंकों को जाँचकर फिर कोशिश करें।');
       }
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : 'बदली जानकारी जाँची नहीं जा सकी। पुराना रिकॉर्ड सुरक्षित है।');
+    } finally {
+      setProcessing(false);
+    }
+  };
 
+  const handleConfirm = async () => {
+    if (!sessionId) return;
+    setProcessing(true);
+    setPageError(null);
+    clearAudio();
+    try {
       const saved = await api.confirmSession(sessionId);
       setStatus('CONFIRMED');
       setConfirmedMessage(saved.message || 'आपकी पुष्टि के बाद रिकॉर्ड सेव हो गया है।');
@@ -232,13 +245,13 @@ export default function VoicePage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col px-5 py-5 sm:px-6">
+    <div className="mx-auto flex min-h-[calc(100dvh-8rem)] w-full max-w-4xl flex-col px-5 py-3 sm:px-7 md:min-h-0 md:px-0 md:py-0">
       <div className="mb-5 flex items-center justify-between gap-3">
         <button
           type="button"
           onClick={() => router.push('/dashboard')}
           aria-label="डैशबोर्ड पर वापस जाएँ"
-          className="flex min-h-11 min-w-11 items-center justify-center rounded-full text-slate-700 hover:bg-slate-100"
+          className="flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-[#e4e2da] bg-[#fffefa] text-slate-700 shadow-sm transition hover:bg-white"
         >
           <ArrowLeft className="h-5 w-5" aria-hidden="true" />
         </button>
@@ -257,10 +270,24 @@ export default function VoicePage() {
         }} />
       </div>
 
-      <header className="mb-5 text-center">
-        <h1 className="text-2xl font-black text-slate-950">बोलकर रिकॉर्ड करें</h1>
-        <p className="mt-1 text-base text-slate-700">काम, दिहाड़ी या मिला हुआ पैसा बताइए</p>
+      <header className="mb-6 text-center">
+        <span className="text-sm font-extrabold tracking-wide text-[#9a6a2b]">आपका हिसाब · आवाज़ से</span>
+        <h1 className="mt-1 text-3xl font-black tracking-tight text-[#173b2f] sm:text-4xl">बोलकर रिकॉर्ड करें</h1>
+        <p className="mt-2 text-base leading-7 text-slate-600 sm:text-lg">काम, दिहाड़ी या मिला हुआ पैसा अपनी भाषा में बताइए।</p>
       </header>
+
+      <ol aria-label="रिकॉर्ड करने के चरण" className="mx-auto mb-6 grid w-full max-w-2xl grid-cols-3 gap-2">
+        {[
+          { label: 'बोलें', complete: ['TRANSCRIBED', 'EXTRACTED', 'AWAITING_INFORMATION', 'READY_FOR_CONFIRMATION', 'CONFIRMED'].includes(status) },
+          { label: 'जाँचें', complete: ['READY_FOR_CONFIRMATION', 'CONFIRMED'].includes(status) },
+          { label: 'पुष्टि करें', complete: status === 'CONFIRMED' },
+        ].map((step, index) => (
+          <li key={step.label} className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-bold ${step.complete ? 'border-[#cadfc9] bg-[#eaf2e7] text-[#285c3d]' : index === 0 ? 'border-[#173b2f] bg-[#173b2f] text-white' : 'border-[#e7e5dc] bg-[#fffefa] text-slate-500'}`}>
+            <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs ${step.complete ? 'bg-[#28734e] text-white' : index === 0 ? 'bg-white/15 text-white' : 'bg-[#efeee8] text-slate-500'}`}>{index + 1}</span>
+            <span className="truncate">{step.label}</span>
+          </li>
+        ))}
+      </ol>
 
       {pageError && (
         <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-base leading-6 text-red-900">
@@ -343,7 +370,7 @@ export default function VoicePage() {
           )}
 
           {extractedData && status === 'READY_FOR_CONFIRMATION' && (
-            <ConfirmationCard key={JSON.stringify(extractedData)} data={extractedData} onConfirm={handleConfirm} onReject={handleReject} isConfirming={processing} />
+            <ConfirmationCard key={JSON.stringify(extractedData)} data={extractedData} onReviewChanges={handleReviewChanges} onConfirm={handleConfirm} onReject={handleReject} isConfirming={processing} />
           )}
         </div>
       )}

@@ -2,6 +2,7 @@ import type {
   Employer,
   ExtractionResponse,
   LedgerSummary,
+  LedgerAlert,
   Payment,
   SpokenReceipt,
   StatementDetail,
@@ -19,6 +20,10 @@ export type VoiceCorrections = {
   days_worked?: number | string | null;
   daily_wage?: number | string | null;
   hours_worked?: number | string | null;
+  wage_basis?: 'daily' | 'hourly' | null;
+  hourly_rate?: number | string | null;
+  overtime_hours?: number | string | null;
+  overtime_multiplier?: number | string | null;
   work_date?: string | null;
   amount_received?: number | string | null;
   payment_type?: 'cash' | 'upi' | 'bank' | 'advance' | 'other' | null;
@@ -199,8 +204,12 @@ class ApiClient {
   async addWorkEntry(data: {
     work_date: string;
     days_worked: number | string;
-    daily_wage: number | string;
+    daily_wage?: number | string;
     hours_worked?: number | string;
+    wage_basis?: 'daily' | 'hourly';
+    hourly_rate?: number | string;
+    overtime_hours?: number | string;
+    overtime_multiplier?: number | string;
     employer_id?: string;
     description?: string;
   }) {
@@ -212,6 +221,20 @@ class ApiClient {
 
   async getPayments() {
     return this.request<Payment[]>('/api/ledger/payments');
+  }
+
+  async allocatePayment(paymentId: string, workEntryId: string, amount: number | string) {
+    return this.request<{
+      id: string;
+      worker_id: string;
+      payment_id: string;
+      work_entry_id: string;
+      amount: string;
+      created_at: string;
+    }>(`/api/ledger/payments/${encodeURIComponent(paymentId)}/allocations`, {
+      method: 'POST',
+      body: JSON.stringify({ work_entry_id: workEntryId, amount }),
+    });
   }
 
   async addPayment(data: {
@@ -227,8 +250,19 @@ class ApiClient {
     });
   }
 
-  async getTransactions(limit: number = 50) {
-    return this.request<TransactionList>(`/api/ledger/transactions?limit=${limit}`);
+  async getTransactions(
+    limit: number = 50,
+    filters?: { employer_id?: string; start_date?: string; end_date?: string },
+  ) {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (filters?.employer_id) query.set('employer_id', filters.employer_id);
+    if (filters?.start_date) query.set('start_date', filters.start_date);
+    if (filters?.end_date) query.set('end_date', filters.end_date);
+    return this.request<TransactionList>(`/api/ledger/transactions?${query.toString()}`);
+  }
+
+  async getLedgerAlerts() {
+    return this.request<LedgerAlert[]>('/api/ledger/alerts');
   }
 
   // Employers

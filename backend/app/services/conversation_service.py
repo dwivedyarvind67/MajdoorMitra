@@ -2,6 +2,8 @@ from typing import Optional, List, Dict, Any
 from decimal import Decimal
 from datetime import datetime, timezone
 
+from app.services.wage_calculator import FinancialService
+
 
 class ConversationService:
     """
@@ -18,6 +20,10 @@ class ConversationService:
         "payment_type": "भुगतान कैसे मिला? (नकद/UPI/बैंक/अग्रिम)",
         "intent": "क्या आप काम दर्ज करना चाहते हैं या भुगतान दर्ज करना चाहते हैं?",
         "hours_worked": "आपने कितने घंटे काम किया?",
+        "hourly_rate": "आपकी प्रति घंटे की मज़दूरी कितनी है?",
+        "wage_basis": "मज़दूरी रोज़ के हिसाब से है या घंटे के हिसाब से?",
+        "overtime_hours": "इनमें से कितने घंटे ओवरटाइम थे?",
+        "overtime_multiplier": "ओवरटाइम का गुणक कितना तय हुआ है? (जैसे 1.5)",
     }
 
     FOLLOW_UP_QUESTIONS_EN = {
@@ -29,6 +35,10 @@ class ConversationService:
         "payment_type": "How was the payment made? (cash/UPI/bank/advance)",
         "intent": "Do you want to log work or log a payment?",
         "hours_worked": "How many hours did you work?",
+        "hourly_rate": "What is your wage per hour?",
+        "wage_basis": "Is the wage agreed per day or per hour?",
+        "overtime_hours": "How many of those hours were overtime?",
+        "overtime_multiplier": "What overtime multiplier was agreed? (for example, 1.5)",
     }
 
     def get_next_state(self, current_status: str, extracted_data: Optional[dict] = None) -> str:
@@ -38,11 +48,11 @@ class ConversationService:
         elif current_status == "TRANSCRIBED":
             return "EXTRACTED"
         elif current_status == "EXTRACTED":
-            if extracted_data and not extracted_data.get("missing_fields"):
+            if extracted_data and not extracted_data.get("missing_fields") and not extracted_data.get("ambiguities"):
                 return "READY_FOR_CONFIRMATION"
             return "AWAITING_INFORMATION"
         elif current_status == "AWAITING_INFORMATION":
-            if extracted_data and not extracted_data.get("missing_fields"):
+            if extracted_data and not extracted_data.get("missing_fields") and not extracted_data.get("ambiguities"):
                 return "READY_FOR_CONFIRMATION"
             return "AWAITING_INFORMATION"
         elif current_status == "READY_FOR_CONFIRMATION":
@@ -54,8 +64,15 @@ class ConversationService:
         missing_fields: List[str],
         language: str = "hi",
         intent: Optional[str] = None,
+        ambiguities: Optional[List[str]] = None,
     ) -> Optional[str]:
         """Generate the next follow-up question for missing fields."""
+        if not missing_fields and ambiguities:
+            return (
+                "एक विवरण स्पष्ट नहीं है। कृपया उसे ठीक करके फिर से जाँचें।"
+                if language == "hi"
+                else "One detail is unclear. Please correct it and review the record again."
+            )
         if not missing_fields:
             return None
 
@@ -79,12 +96,7 @@ class ConversationService:
         if employer:
             lines.append(f"ठेकेदार: {employer}" if hindi else f"Employer: {employer}")
         if intent == "log_work":
-            lines.append(f"काम के दिन: {extracted_data.get('days_worked')}" if hindi else f"Work days: {extracted_data.get('days_worked')}")
-            lines.append(f"दैनिक मज़दूरी: ₹{extracted_data.get('daily_wage')}" if hindi else f"Daily wage: ₹{extracted_data.get('daily_wage')}")
-            if extracted_data.get("hours_worked") is not None:
-                lines.append(f"घंटे: {extracted_data['hours_worked']}" if hindi else f"Hours: {extracted_data['hours_worked']}")
-            total = Decimal(str(extracted_data.get("days_worked", 0))) * Decimal(str(extracted_data.get("daily_wage", 0)))
-            lines.append(f"कुल कमाई: ₹{total:.2f}" if hindi else f"Total earned: ₹{total:.2f}")
+            self._append_work_breakdown(lines, extracted_data, hindi)
         elif intent == "log_payment":
             lines.append(f"मिला भुगतान: ₹{extracted_data.get('amount_received')}" if hindi else f"Payment received: ₹{extracted_data.get('amount_received')}")
             lines.append(f"भुगतान का तरीका: {extracted_data.get('payment_type')}" if hindi else f"Payment method: {extracted_data.get('payment_type')}")
@@ -103,10 +115,7 @@ class ConversationService:
             if employer:
                 lines.append(f"ठेकेदार: {employer}")
             if intent == "log_work":
-                lines.append(f"काम के दिन: {extracted_data.get('days_worked')}")
-                lines.append(f"दैनिक मज़दूरी: ₹{extracted_data.get('daily_wage')}")
-                total = Decimal(str(extracted_data.get('days_worked', 0))) * Decimal(str(extracted_data.get('daily_wage', 0)))
-                lines.append(f"कुल कमाई: ₹{total:.2f}")
+                self._append_work_breakdown(lines, extracted_data, True)
             elif intent == "log_payment":
                 lines.append(f"मिला भुगतान: ₹{extracted_data.get('amount_received')}")
                 lines.append(f"भुगतान का तरीका: {extracted_data.get('payment_type')}")
@@ -118,16 +127,59 @@ class ConversationService:
         if employer:
             lines.append(f"Employer: {employer}")
         if intent == "log_work":
-            lines.append(f"Work days: {extracted_data.get('days_worked')}")
-            lines.append(f"Daily wage: ₹{extracted_data.get('daily_wage')}")
-            total = Decimal(str(extracted_data.get('days_worked', 0))) * Decimal(str(extracted_data.get('daily_wage', 0)))
-            lines.append(f"Total earned: ₹{total:.2f}")
+            self._append_work_breakdown(lines, extracted_data, False)
         elif intent == "log_payment":
             lines.append(f"Payment received: ₹{extracted_data.get('amount_received')}")
             lines.append(f"Payment method: {extracted_data.get('payment_type')}")
         if work_date:
             lines.append(f"Date: {work_date}")
         return "\n".join(lines)
+
+    @staticmethod
+    def _append_work_breakdown(lines: List[str], data: dict, hindi: bool) -> None:
+        """Use the shared financial engine for spoken and visible totals."""
+        breakdown = FinancialService.calculate_work_breakdown(
+            days_worked=data.get("days_worked") or 0,
+            daily_wage=data.get("daily_wage"),
+            hours_worked=data.get("hours_worked"),
+            wage_basis=data.get("wage_basis", "daily"),
+            hourly_rate=data.get("hourly_rate"),
+            overtime_hours=data.get("overtime_hours") or 0,
+            overtime_multiplier=data.get("overtime_multiplier") or "1.5",
+        )
+        if data.get("wage_basis") == "hourly":
+            lines.append(
+                f"घंटे: {data.get('hours_worked')} × ₹{data.get('hourly_rate')} प्रति घंटा"
+                if hindi
+                else f"Hours: {data.get('hours_worked')} × ₹{data.get('hourly_rate')} per hour"
+            )
+        else:
+            lines.append(
+                f"काम के दिन: {data.get('days_worked')}"
+                if hindi else f"Work days: {data.get('days_worked')}"
+            )
+            lines.append(
+                f"दैनिक मज़दूरी: ₹{data.get('daily_wage')}"
+                if hindi else f"Daily wage: ₹{data.get('daily_wage')}"
+            )
+        if data.get("hours_worked") is not None and data.get("wage_basis") != "hourly":
+            lines.append(f"घंटे: {data['hours_worked']}" if hindi else f"Hours: {data['hours_worked']}")
+        if data.get("overtime_hours"):
+            lines.append(
+                f"ओवरटाइम: {data['overtime_hours']} घंटे × {data.get('overtime_multiplier') or '1.5'}"
+                if hindi
+                else f"Overtime: {data['overtime_hours']} hours × {data.get('overtime_multiplier') or '1.5'}"
+            )
+            lines.append(
+                f"ओवरटाइम कमाई: ₹{breakdown['overtime_earned']:.2f}"
+                if hindi
+                else f"Overtime earnings: ₹{breakdown['overtime_earned']:.2f}"
+            )
+        lines.append(
+            f"कुल कमाई: ₹{breakdown['total_earned']:.2f}"
+            if hindi
+            else f"Total earned: ₹{breakdown['total_earned']:.2f}"
+        )
 
     def apply_correction(self, extracted_data: dict, field: str, value: Any) -> dict:
         """Apply a user correction to extracted data."""

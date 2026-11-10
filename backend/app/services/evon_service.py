@@ -16,19 +16,24 @@ class ExtractionError(Exception):
 class EvonService:
     SYSTEM_PROMPT = """You extract worker-reported wage records for MazdoorMitra.
 Return one JSON object with these keys: intent, days_worked, daily_wage,
-hours_worked, work_date, amount_received, payment_type, employer_name,
+hours_worked, wage_basis, hourly_rate, overtime_hours, overtime_multiplier,
+work_date, amount_received, payment_type, employer_name,
 description, missing_fields, ambiguities. intent must be log_work,
 log_payment, query, or unknown. payment_type must be cash, upi, bank,
 advance, other, or null. Use YYYY-MM-DD dates. Use numeric values for amounts.
 Never invent a number, employer, date, or payment method. Use null and list
-missing required fields when the worker did not say the value. For payments,
+missing required fields when the worker did not say the value. Set wage_basis
+to daily or hourly according to the stated rate; never convert an hourly rate
+into a daily rate. Use overtime_hours and overtime_multiplier only when the
+worker explicitly states them. For payments,
 store the received date in work_date. Do not mark an optional employer or
 description as required. Set requires_confirmation to true."""
 
     REPLY_PROMPT = """Interpret the worker's latest answer or correction for the
 existing wage record. Return a JSON object containing only fields that the
 worker explicitly supplied or corrected, using keys from: intent,
-days_worked, daily_wage, hours_worked, work_date, amount_received,
+days_worked, daily_wage, hours_worked, wage_basis, hourly_rate,
+overtime_hours, overtime_multiplier, work_date, amount_received,
 payment_type, employer_name, description. Do not repeat untouched fields.
 Use null for fields that were not changed, and never infer missing values.
 For a one-field follow-up, use the first missing field from the current record

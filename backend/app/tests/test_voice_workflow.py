@@ -55,6 +55,12 @@ class FakeTimbre:
         return WAVE + b"spoken-audio"
 
 
+class FailingTimbre:
+    async def speak(self, *_args, **_kwargs):
+        from app.services.timbre_service import TTSError
+        raise TTSError("provider unavailable")
+
+
 def headers(token):
     return {"Authorization": f"Bearer {token}"}
 
@@ -104,6 +110,10 @@ async def test_voice_work_is_only_saved_after_confirmation_and_returns_spoken_re
     assert repeated.status_code == 200
     assert repeated.json()["work_entry_id"] == saved.json()["work_entry_id"]
 
+    statement = (await client.get(f"/api/statements/{session_id}", headers=headers(auth_token))).json()
+    assert statement["confirmed_at"]
+    assert statement["transcript"] == uploaded.json()["transcript"]
+
     summary = (await client.get("/api/ledger/summary", headers=headers(auth_token))).json()
     assert Decimal(summary["total_earned"]) == Decimal("1778.00")
     assert Decimal(summary["balance"]) == Decimal("1778.00")
@@ -113,6 +123,12 @@ async def test_voice_work_is_only_saved_after_confirmation_and_returns_spoken_re
     assert spoken.status_code == 200
     assert base64.b64decode(spoken.json()["audio_base64"]) == WAVE + b"spoken-audio"
     assert spoken.json()["audio_content_type"] == "audio/wav"
+
+    monkeypatch.setattr(voice, "get_timbre_service", lambda: FailingTimbre())
+    failed_speech = await client.post(f"/api/voice/sessions/{session_id}/speak", headers=headers(auth_token), json={})
+    assert failed_speech.status_code == 502
+    after_speech_failure = (await client.get("/api/ledger/summary", headers=headers(auth_token))).json()
+    assert Decimal(after_speech_failure["total_earned"]) == Decimal("1778.00")
 
 
 @pytest.mark.asyncio
@@ -277,6 +293,92 @@ async def test_partial_payment_and_advance_are_summarized_per_employer(
     by_employer = {row["employer_name"]: row for row in summary["employers"]}
     assert Decimal(by_employer["Sharma Construction"]["balance"]) == Decimal("1178.00")
     assert Decimal(by_employer["Patel Site"]["overpaid"]) == Decimal("200.00")
+
+
+@pytest.mark.asyncio
+async def test_hourly_overtime_voice_record_is_shown_recalculated_and_only_saved_after_confirmation(
+    client: AsyncClient, auth_token, monkeypatch
+):
+    from app.api import voice
+
+    hourly_record = {
+        "intent": "log_work",
+        "wage_basis": "hourly",
+        "days_worked": "0",
+        "hours_worked": "10",
+        "hourly_rate": "100",
+        "overtime_hours": "2",
+        "overtime_multiplier": "1.5",
+        "work_date": "2026-11-10",
+    }
+    monkeypatch.setattr(voice, "get_prisma_service", lambda: FakePrisma())
+    monkeypatch.setattr(voice, "get_evon_service", lambda: FakeEvon(extracted=hourly_record))
+    session_id = await create_session(client, auth_token)
+    _, extracted = await upload_and_extract(client, auth_token, session_id)
+
+    assert extracted.status_code == 200
+    data = extracted.json()["extracted_data"]
+    assert data["base_earned"] == "800.00"
+    assert data["overtime_earned"] == "300.00"
+    assert data["calculated_total"] == "1100.00"
+    before = (await client.get("/api/ledger/summary", headers=headers(auth_token))).json()
+    assert Decimal(before["total_earned"]) == Decimal("0.00")
+
+    saved = await client.post(f"/api/voice/sessions/{session_id}/confirm", headers=headers(auth_token))
+    assert saved.status_code == 200
+    work = (await client.get("/api/ledger/work", headers=headers(auth_token))).json()[0]
+    assert work["wage_basis"] == "hourly"
+    assert Decimal(work["total_earned"]) == Decimal("1100.00")
+
+    monkeypatch.setattr(voice, "get_timbre_service", lambda: FakeTimbre())
+    receipt = await client.post(f"/api/voice/sessions/{session_id}/speak", headers=headers(auth_token), json={})
+    assert receipt.status_code == 200
+    assert "₹1100.00" in receipt.json()["text"]
+
+
+@pytest.mark.asyncio
+async def test_possible_exact_duplicate_is_flagged_before_confirmation_and_not_saved_twice(
+    client: AsyncClient, auth_token, test_worker, db_session, monkeypatch
+):
+    from app.api import voice
+    from app.models.models import Employer
+    from app.schemas.ledger import WorkEntryCreate
+    from app.services.ledger_service import LedgerService
+
+    employer = Employer(
+        id="duplicate-voice-employer",
+        worker_id=test_worker.id,
+        name="Sharma Construction",
+    )
+    db_session.add(employer)
+    await db_session.commit()
+    await LedgerService.create_work_entry(
+        db_session,
+        test_worker.id,
+        WorkEntryCreate(
+            employer_id=employer.id,
+            work_date=date(2026, 11, 9),
+            days_worked=Decimal("2.5"),
+            daily_wage=Decimal("711.20"),
+            description="Earlier record",
+        ),
+    )
+    await db_session.commit()
+    monkeypatch.setattr(voice, "get_prisma_service", lambda: FakePrisma())
+    monkeypatch.setattr(voice, "get_evon_service", lambda: FakeEvon())
+
+    session_id = await create_session(client, auth_token)
+    _, extraction = await upload_and_extract(client, auth_token, session_id)
+    possible = extraction.json()["extracted_data"]["possible_duplicates"]
+    assert len(possible) == 1
+    assert possible[0]["exact"] is True
+
+    duplicate_confirm = await client.post(
+        f"/api/voice/sessions/{session_id}/confirm", headers=headers(auth_token)
+    )
+    assert duplicate_confirm.status_code == 409
+    transactions = (await client.get("/api/ledger/transactions", headers=headers(auth_token))).json()
+    assert transactions["total_count"] == 1
 
 
 @pytest.mark.asyncio

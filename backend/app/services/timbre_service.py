@@ -28,7 +28,7 @@ class TimbreService:
             raise TTSError("There is no text to speak.")
 
         lang_code = "hi-IN" if language == "hi" else "en-IN"
-        voice_name = "Nalini" if language == "hi" else "Maya"
+        voice_name = "Nalini" if language == "hi" else "Kaveri"
         headers = {
             "X-API-Key-ID": self.api_key.strip(),
             "Content-Type": "application/json",

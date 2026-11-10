@@ -22,15 +22,15 @@ class Settings(BaseSettings):
 
     # Gnani Prisma (Speech-to-Text)
     GNANI_PRISMA_API_KEY: str = ""
-    GNANI_PRISMA_API_URL: str = "https://api.gnani.ai/prisma/v1"
+    GNANI_PRISMA_API_URL: str = "https://api.vachana.ai/stt/v3"
 
     # Gnani Evon (LLM / NLP extraction)
     GNANI_EVON_API_KEY: str = ""
-    GNANI_EVON_API_URL: str = "https://api.gnani.ai/evon/v1"
+    GNANI_EVON_API_URL: str = "https://api.vachana.ai/v1/chat/completions"
 
     # Gnani Timbre (Text-to-Speech)
     GNANI_TIMBRE_API_KEY: str = ""
-    GNANI_TIMBRE_API_URL: str = "https://api.gnani.ai/timbre/v1"
+    GNANI_TIMBRE_API_URL: str = "https://api.vachana.ai/api/v1/tts/inference"
 
     # CORS
     CORS_ORIGINS: List[str] = ["http://localhost:3000"]

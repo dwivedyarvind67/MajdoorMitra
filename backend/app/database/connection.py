@@ -68,8 +68,14 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 async def init_db() -> None:
     """Create ORM tables and apply small, backward-compatible schema upgrades."""
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        await conn.run_sync(_add_confirmed_at_if_missing)
+        await conn.run_sync(upgrade_schema)
+
+
+def upgrade_schema(connection) -> None:
+    """Apply additive schema changes while preserving every existing row."""
+    Base.metadata.create_all(connection)
+    _add_confirmed_at_if_missing(connection)
+    _add_work_financial_columns_if_missing(connection)
 
 
 def _add_confirmed_at_if_missing(connection) -> None:
@@ -82,3 +88,36 @@ def _add_confirmed_at_if_missing(connection) -> None:
         return
     column_type = "DATETIME" if connection.dialect.name == "sqlite" else "TIMESTAMP WITH TIME ZONE"
     connection.execute(text(f"ALTER TABLE voice_statements ADD COLUMN confirmed_at {column_type}"))
+
+
+def _add_work_financial_columns_if_missing(connection) -> None:
+    """Add explicit wage basis and overtime details to pre-existing work tables."""
+    inspector = inspect(connection)
+    if "work_entries" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("work_entries")}
+    additions = {
+        "wage_basis": "VARCHAR(10) NOT NULL DEFAULT 'daily'",
+        "hourly_rate": "NUMERIC(15, 2)",
+        "overtime_hours": "NUMERIC(15, 2) NOT NULL DEFAULT 0",
+        "overtime_multiplier": "NUMERIC(4, 2) NOT NULL DEFAULT 1.5",
+    }
+    for name, definition in additions.items():
+        if name not in columns:
+            connection.execute(text(f"ALTER TABLE work_entries ADD COLUMN {name} {definition}"))
+    if connection.dialect.name == "postgresql":
+        existing_constraints = {
+            constraint.get("name")
+            for constraint in inspect(connection).get_check_constraints("work_entries")
+        }
+        checks = {
+            "ck_work_entries_wage_basis_allowed": "wage_basis IN ('daily', 'hourly')",
+            "ck_work_entries_hourly_rate_positive": "hourly_rate IS NULL OR hourly_rate > 0",
+            "ck_work_entries_overtime_non_negative": "overtime_hours >= 0",
+            "ck_work_entries_overtime_multiplier": "overtime_multiplier >= 1 AND overtime_multiplier <= 3",
+        }
+        for name, expression in checks.items():
+            if name not in existing_constraints:
+                connection.execute(
+                    text(f"ALTER TABLE work_entries ADD CONSTRAINT {name} CHECK ({expression})")
+                )

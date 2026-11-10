@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Literal
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
@@ -39,6 +39,14 @@ class ExtractionResult(BaseModel):
     days_worked: Optional[Decimal] = None
     daily_wage: Optional[Decimal] = None
     hours_worked: Optional[Decimal] = None
+    wage_basis: Literal["daily", "hourly"] = "daily"
+    hourly_rate: Optional[Decimal] = None
+    overtime_hours: Optional[Decimal] = Decimal("0.00")
+    overtime_multiplier: Optional[Decimal] = Decimal("1.50")
+    base_earned: Optional[Decimal] = None
+    overtime_earned: Optional[Decimal] = None
+    calculated_total: Optional[Decimal] = None
+    possible_duplicates: List[dict[str, Any]] = Field(default_factory=list)
     work_date: Optional[str] = None
     amount_received: Optional[Decimal] = None
     payment_type: Optional[str] = None
@@ -73,11 +81,15 @@ class ExtractionCorrection(BaseModel):
     """Worker-entered corrections applied before explicit confirmation."""
 
     intent: Optional[str] = Field(None, pattern=r"^(log_work|log_payment)$")
-    days_worked: Optional[Decimal] = Field(None, ge=0, le=31, decimal_places=2)
-    daily_wage: Optional[Decimal] = Field(None, ge=0, decimal_places=2)
-    hours_worked: Optional[Decimal] = Field(None, ge=0, le=24, decimal_places=2)
+    days_worked: Optional[Decimal] = Field(None, ge=0, le=31, max_digits=15, decimal_places=2)
+    daily_wage: Optional[Decimal] = Field(None, ge=0, max_digits=15, decimal_places=2)
+    hours_worked: Optional[Decimal] = Field(None, ge=0, le=24, max_digits=15, decimal_places=2)
+    wage_basis: Optional[Literal["daily", "hourly"]] = None
+    hourly_rate: Optional[Decimal] = Field(None, gt=0, max_digits=15, decimal_places=2)
+    overtime_hours: Optional[Decimal] = Field(None, ge=0, le=24, max_digits=15, decimal_places=2)
+    overtime_multiplier: Optional[Decimal] = Field(None, ge=1, le=3, max_digits=4, decimal_places=2)
     work_date: Optional[date] = None
-    amount_received: Optional[Decimal] = Field(None, ge=0, decimal_places=2)
+    amount_received: Optional[Decimal] = Field(None, gt=0, max_digits=15, decimal_places=2)
     payment_type: Optional[str] = Field(None, pattern=r"^(cash|upi|bank|advance|other)$")
     employer_name: Optional[str] = Field(None, max_length=255)
     description: Optional[str] = Field(None, max_length=500)

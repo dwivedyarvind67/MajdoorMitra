@@ -14,7 +14,7 @@ export default function WorkHistory({ entries, isLoading }: WorkHistoryProps) {
     return (
       <div className="space-y-3">
         {[1, 2, 3].map((i) => (
-          <div key={i} className="h-16 bg-slate-100 rounded-xl animate-pulse"></div>
+          <div key={i} className="h-20 animate-pulse rounded-2xl border border-[#e7e5dc] bg-[#fffefa]"></div>
         ))}
       </div>
     );
@@ -22,15 +22,16 @@ export default function WorkHistory({ entries, isLoading }: WorkHistoryProps) {
 
   if (!entries || entries.length === 0) {
     return (
-      <div className="text-center py-8 text-slate-400 bg-white rounded-2xl border border-dashed border-slate-200">
-        <Briefcase className="w-8 h-8 mx-auto mb-2 opacity-50" />
-        <p className="text-sm font-medium">कोई काम का रिकॉर्ड नहीं मिला</p>
+      <div className="rounded-3xl border border-dashed border-[#d9ddd3] bg-[#fffefa] py-10 text-center text-slate-600">
+        <Briefcase className="mx-auto mb-3 h-9 w-9 text-[#28734e]" />
+        <p className="text-base font-bold text-[#173b2f]">अभी कोई काम का रिकॉर्ड नहीं</p>
+        <p className="mt-1 text-sm">काम दर्ज होने के बाद वह यहाँ दिखाई देगा।</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-2.5">
+    <div className="grid gap-3 md:grid-cols-2">
       {entries.map((w) => {
         const dateStr = new Date(w.work_date).toLocaleDateString('hi-IN', {
           day: 'numeric',
@@ -41,26 +42,34 @@ export default function WorkHistory({ entries, isLoading }: WorkHistoryProps) {
         return (
           <div
             key={w.id}
-            className="flex items-center justify-between p-3.5 bg-white border border-slate-100 rounded-xl shadow-sm"
+            className="flex min-w-0 items-center justify-between gap-3 rounded-2xl border border-[#e7e5dc] bg-[#fffefa] p-4 shadow-[0_6px_20px_rgba(40,54,43,0.035)] sm:p-5"
           >
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#e8efe6] text-[#28734e]">
                 <Briefcase className="w-5 h-5" />
               </div>
               <div className="text-left">
-                <h4 className="text-sm font-bold text-slate-800">
+                <h4 className="text-base font-extrabold text-[#173b2f]">
                   {w.employer_name || 'मालिक का नाम नहीं'}
                 </h4>
-                <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
+                <div className="mt-1 flex flex-wrap items-center gap-1.5 text-sm text-slate-600">
                   <span>{dateStr}</span>
                   <span>•</span>
-                  <span>{w.days_worked} दिन @ ₹{w.daily_wage}</span>
+                  {w.wage_basis === 'hourly' ? (
+                    <span>{w.hours_worked} घंटे @ ₹{w.hourly_rate}/घंटा</span>
+                  ) : (
+                    <span>{w.days_worked} दिन @ ₹{w.daily_wage}</span>
+                  )}
+                  {Number(w.overtime_hours || 0) > 0 && <span>• {w.overtime_hours} घंटे ओवरटाइम</span>}
                 </div>
+                {Number(w.allocated_amount || 0) > 0 && (
+                  <p className="mt-1 text-xs font-semibold text-slate-500">काम से जोड़ा गया: ₹{w.allocated_amount}</p>
+                )}
               </div>
             </div>
 
             <div className="text-right">
-              <span className="text-base font-extrabold text-blue-800">
+              <span className="shrink-0 text-base font-black text-[#28734e] sm:text-lg">
                 ₹{w.total_earned}
               </span>
             </div>

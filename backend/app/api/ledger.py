@@ -3,18 +3,22 @@ Ledger API endpoints: summaries, work entries, payments, and combined timeline.
 All queries are filtered by the authenticated worker_id for data isolation.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.connection import get_db
-from app.models.models import Employer, WorkEntry, Payment
+from app.models.models import AuditEvent, Employer, WorkEntry, Payment, PaymentAllocation
 from app.schemas.ledger import (
+    AuditEventResponse,
     LedgerSummary,
+    LedgerAlertResponse,
     PaymentCreate,
+    PaymentAllocationCreate,
+    PaymentAllocationResponse,
     PaymentResponse,
     TransactionItem,
     TransactionList,
@@ -22,9 +26,19 @@ from app.schemas.ledger import (
     WorkEntryResponse,
 )
 from app.services.ledger_service import LedgerService
+from app.services.mismatch_service import MismatchService
 from app.utils.auth import get_current_worker_id
 
 router = APIRouter(prefix="/api/ledger", tags=["ledger"])
+
+
+@router.get("/alerts", response_model=List[LedgerAlertResponse])
+async def get_ledger_alerts(
+    worker_id: str = Depends(get_current_worker_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return explainable, worker-scoped ledger checks without changing records."""
+    return await MismatchService.get_alerts(db, worker_id)
 
 
 @router.get("/summary", response_model=LedgerSummary)
@@ -38,6 +52,10 @@ async def get_summary(
     """Get dashboard summary for the authenticated worker."""
     sd = _parse_date(start_date) if start_date else None
     ed = _parse_date(end_date) if end_date else None
+    if sd and ed and sd > ed:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Start date must be on or before end date.")
+    if ed:
+        ed += timedelta(days=1)
 
     return await LedgerService.get_summary(
         db, worker_id, employer_id=employer_id, start_date=sd, end_date=ed
@@ -57,6 +75,10 @@ async def list_work_entries(
     """List work entries for the authenticated worker."""
     sd = _parse_date(start_date) if start_date else None
     ed = _parse_date(end_date) if end_date else None
+    if sd and ed and sd > ed:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Start date must be on or before end date.")
+    if ed:
+        ed += timedelta(days=1)
 
     work_query = select(WorkEntry).where(WorkEntry.worker_id == worker_id)
     if employer_id:
@@ -64,7 +86,7 @@ async def list_work_entries(
     if sd:
         work_query = work_query.where(WorkEntry.work_date >= sd)
     if ed:
-        work_query = work_query.where(WorkEntry.work_date <= ed)
+        work_query = work_query.where(WorkEntry.work_date < ed)
 
     work_query = work_query.order_by(WorkEntry.work_date.desc()).limit(limit).offset(offset)
     result = await db.execute(work_query)
@@ -72,6 +94,12 @@ async def list_work_entries(
 
     # Build employer name map
     emp_map = await _get_employer_map(db, worker_id)
+    allocated_rows = await db.execute(
+        select(PaymentAllocation.work_entry_id, func.sum(PaymentAllocation.amount))
+        .where(PaymentAllocation.worker_id == worker_id)
+        .group_by(PaymentAllocation.work_entry_id)
+    )
+    allocation_map = {entry_id: amount for entry_id, amount in allocated_rows.all()}
 
     return [
         WorkEntryResponse(
@@ -83,7 +111,13 @@ async def list_work_entries(
             days_worked=e.days_worked,
             hours_worked=e.hours_worked,
             daily_wage=e.daily_wage,
+            wage_basis=e.wage_basis,
+            hourly_rate=e.hourly_rate,
+            overtime_hours=e.overtime_hours,
+            overtime_multiplier=e.overtime_multiplier,
             total_earned=e.total_earned,
+            allocated_amount=allocation_map.get(e.id, 0),
+            outstanding_amount=max(e.total_earned - allocation_map.get(e.id, 0), 0),
             description=e.description,
             source_statement_id=e.source_statement_id,
             created_at=e.created_at,
@@ -111,7 +145,13 @@ async def create_work_entry(
         days_worked=entry.days_worked,
         hours_worked=entry.hours_worked,
         daily_wage=entry.daily_wage,
+        wage_basis=entry.wage_basis,
+        hourly_rate=entry.hourly_rate,
+        overtime_hours=entry.overtime_hours,
+        overtime_multiplier=entry.overtime_multiplier,
         total_earned=entry.total_earned,
+        allocated_amount=0,
+        outstanding_amount=entry.total_earned,
         description=entry.description,
         source_statement_id=entry.source_statement_id,
         created_at=entry.created_at,
@@ -131,6 +171,10 @@ async def list_payments(
     """List payments for the authenticated worker."""
     sd = _parse_date(start_date) if start_date else None
     ed = _parse_date(end_date) if end_date else None
+    if sd and ed and sd > ed:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Start date must be on or before end date.")
+    if ed:
+        ed += timedelta(days=1)
 
     pay_query = select(Payment).where(Payment.worker_id == worker_id)
     if employer_id:
@@ -138,13 +182,19 @@ async def list_payments(
     if sd:
         pay_query = pay_query.where(Payment.payment_date >= sd)
     if ed:
-        pay_query = pay_query.where(Payment.payment_date <= ed)
+        pay_query = pay_query.where(Payment.payment_date < ed)
 
     pay_query = pay_query.order_by(Payment.payment_date.desc()).limit(limit).offset(offset)
     result = await db.execute(pay_query)
     payments = result.scalars().all()
 
     emp_map = await _get_employer_map(db, worker_id)
+    allocated_rows = await db.execute(
+        select(PaymentAllocation.payment_id, func.sum(PaymentAllocation.amount))
+        .where(PaymentAllocation.worker_id == worker_id)
+        .group_by(PaymentAllocation.payment_id)
+    )
+    allocation_map = {payment_id: amount for payment_id, amount in allocated_rows.all()}
 
     return [
         PaymentResponse(
@@ -153,6 +203,8 @@ async def list_payments(
             employer_id=p.employer_id,
             employer_name=emp_map.get(p.employer_id) if p.employer_id else None,
             amount=p.amount,
+            allocated_amount=allocation_map.get(p.id, 0),
+            unallocated_amount=max(p.amount - allocation_map.get(p.id, 0), 0),
             payment_date=p.payment_date,
             payment_type=p.payment_type.value if hasattr(p.payment_type, "value") else str(p.payment_type),
             notes=p.notes,
@@ -179,6 +231,8 @@ async def create_payment(
         employer_id=payment.employer_id,
         employer_name=emp_map.get(payment.employer_id) if payment.employer_id else None,
         amount=payment.amount,
+        allocated_amount=0,
+        unallocated_amount=payment.amount,
         payment_date=payment.payment_date,
         payment_type=payment.payment_type.value if hasattr(payment.payment_type, "value") else str(payment.payment_type),
         notes=payment.notes,
@@ -190,12 +244,56 @@ async def create_payment(
 @router.get("/transactions", response_model=TransactionList)
 async def get_transactions(
     limit: int = Query(50, ge=1, le=200),
+    employer_id: Optional[str] = Query(None),
+    start_date: Optional[str] = Query(None, description="ISO date YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="ISO date YYYY-MM-DD"),
     worker_id: str = Depends(get_current_worker_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Combined timeline of work entries and payments."""
-    items = await LedgerService.get_transaction_timeline(db, worker_id, limit=limit)
+    """Combined timeline with optional employer and inclusive date filters."""
+    sd = _parse_date(start_date) if start_date else None
+    ed = _parse_date(end_date) if end_date else None
+    if sd and ed and sd > ed:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Start date must be on or before end date.")
+    if ed:
+        ed += timedelta(days=1)
+    items = await LedgerService.get_transaction_timeline(
+        db, worker_id, limit=limit, employer_id=employer_id, start_date=sd, end_date=ed
+    )
     return TransactionList(transactions=items, total_count=len(items))
+
+
+@router.post(
+    "/payments/{payment_id}/allocations",
+    response_model=PaymentAllocationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def allocate_payment(
+    payment_id: str,
+    body: PaymentAllocationCreate,
+    worker_id: str = Depends(get_current_worker_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Apply part of a payment or advance to one recorded work entry."""
+    return await LedgerService.allocate_payment(db, worker_id, payment_id, body)
+
+
+@router.get("/audit", response_model=List[AuditEventResponse])
+async def list_audit_events(
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    worker_id: str = Depends(get_current_worker_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """List immutable change events for the authenticated worker only."""
+    result = await db.execute(
+        select(AuditEvent)
+        .where(AuditEvent.worker_id == worker_id)
+        .order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    return result.scalars().all()
 
 
 # ---- Helpers ----

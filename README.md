@@ -96,7 +96,7 @@ mazdoormitra/
 │   │   ├── utils/
 │   │   │   ├── auth.py              # JWT creation and verification
 │   │   │   └── validators.py        # Input validators
-│   │   ├── tests/                   # pytest suite (42 tests)
+│   │   ├── tests/                   # pytest suite (workflow, migration, and arithmetic coverage)
 │   │   ├── config.py                # pydantic-settings configuration
 │   │   └── main.py                  # Application entry point
 │   ├── requirements.txt
@@ -192,13 +192,13 @@ All backend configuration is managed through `backend/.env`. See `backend/.env.e
 | `JWT_EXPIRATION_MINUTES` | No | `1440` | Token expiry (default 24 hours). |
 | `GNANI_PRISMA_API_KEY` | For voice | — | Gnani Prisma (STT) API key. |
 | `GNANI_PRISMA_API_URL` | For voice | `https://api.vachana.ai/stt/v3` | Prisma endpoint. |
-| `GNANI_EVON_API_KEY` | For voice | — | Gnani Evon (LLM) API key. |
+| `GNANI_EVON_API_KEY` | For voice | — | Gnani Evon API key with the required beta/service scope. |
 | `GNANI_EVON_API_URL` | For voice | `https://api.vachana.ai/v1/chat/completions` | Evon endpoint. |
 | `GNANI_TIMBRE_API_KEY` | For voice | — | Gnani Timbre (TTS) API key. |
 | `GNANI_TIMBRE_API_URL` | For voice | `https://api.vachana.ai/api/v1/tts/inference` | Timbre endpoint. |
 | `CORS_ORIGINS` | No | `["http://localhost:3000"]` | Allowed CORS origins (JSON array or comma-separated). |
 
-The application runs without Gnani API keys — voice features will return provider errors, but all other functionality (auth, ledger, employers, statements) works normally.
+The application runs without Gnani API keys — voice features return provider errors, but other functionality (auth, ledger, employers, statements) remains available. Gnani currently lists Evon v3.3 API access as a selected closed beta; an API key without that service access returns an upstream error. The app preserves the transcript and never substitutes fake extraction output.
 
 ## API Reference
 
@@ -263,18 +263,17 @@ All endpoints enforce per-worker data isolation.
 
 ## Database Schema
 
-Six tables with UUID primary keys (`String(36)` for SQLite/PostgreSQL portability). All monetary columns use `Numeric(15, 2)` to prevent floating-point errors.
+Eight tables with UUID primary keys (`String(36)` for SQLite/PostgreSQL portability). All monetary columns use `Numeric(15, 2)` to prevent floating-point errors.
 
 ```
 workers
-├── employers          (worker_id FK, ON DELETE CASCADE)
-├── work_entries       (worker_id FK, employer_id FK nullable)
-├── payments           (worker_id FK, employer_id FK nullable)
-├── voice_statements   (worker_id FK)
-│   ├── work_entries   (source_statement_id FK nullable)
-│   ├── payments       (source_statement_id FK nullable)
-│   └── evidence_files (statement_id FK nullable)
-└── evidence_files     (worker_id FK)
+├── employers             (worker_id FK)
+├── work_entries          (worker/employer/source-statement FKs)
+├── payments              (worker/employer/source-statement FKs)
+├── payment_allocations   (worker/payment/work FKs; partial amount allocations)
+├── voice_statements      (worker_id FK)
+├── evidence_files        (worker/statement FKs)
+└── audit_events          (worker FK; append-only change history)
 ```
 
 **Statement status lifecycle:**
@@ -293,15 +292,16 @@ The voice pipeline is a stateful, multi-turn conversation that converts spoken H
 5. **Clarify** — If fields are missing, the system generates a localized follow-up question (Hindi or English). The worker can reply by voice or text. This loop repeats until all required fields are present.
 6. **Confirm** — Worker reviews the extracted summary and confirms or rejects.
 7. **Persist** — On confirmation, the system atomically creates the corresponding `WorkEntry` or `Payment` record, resolves or creates the `Employer`, and marks the statement as `CONFIRMED`.
-8. **Receipt** — Gnani Timbre generates a spoken audio receipt of the confirmed record.
+8. **Receipt** — Gnani Timbre generates a spoken audio receipt of the confirmed record. A provider failure leaves the saved record intact.
 
 ## Wage Calculation Engine
 
 All financial arithmetic uses Python `Decimal` with `ROUND_HALF_UP` quantization to two decimal places. Floating-point types are not accepted.
 
-- **Work entry total:** `days_worked * daily_wage` (or `hours_worked * (daily_wage / 8)` for hourly prorating)
+- **Work entry total:** daily or explicit hourly rate, plus separately itemized overtime using the recorded multiplier. All values are recomputed with `Decimal` on the backend and shown before the worker confirms.
 - **Balance:** `total_earned - total_received` (positive = owed to worker, negative = overpaid)
-- **Summary:** Computes `total_earned`, `total_received`, `total_advances`, `balance`, `pending`, `overpaid`, `total_work_days` — both overall and per-employer.
+- **Payment allocation:** A payment can be applied partially to one or more work entries. Allocation links are capped by both the remaining payment and work amounts; they never count the payment twice.
+- **Summary:** Computes `total_earned`, `total_received`, `total_advances`, `balance`, `pending`, `overpaid`, `total_work_days` — both overall and per-employer. Changing rates on later work entries preserves the earlier agreed amount.
 
 ## PDF Statement Generation
 
@@ -330,6 +330,8 @@ The test suite covers:
 - Extraction validation (bounds checking, sanitization, missing field detection)
 - Conversation state machine (state transitions, follow-up generation, reply parsing)
 - PDF generation (layout, formatting, content)
+- Voice API workflow (confirmation gate, duplicate detection, provider failures, hourly overtime, spoken receipts)
+- Database migration preservation, audit ownership, partial allocations, and provider request contracts
 
 All tests mock external providers at the boundary and do not require API keys.
 
@@ -342,7 +344,7 @@ cd backend
 python smoke_gnani.py
 ```
 
-Exercises the Timbre → Prisma → Evon pipeline with synthetic Hindi speech. Does not persist any records.
+Exercises the Timbre → Prisma → Evon pipeline with synthetic Hindi speech. Does not persist any records. A current live run can pass Timbre and Prisma but fail Evon with HTTP 403 when the API key lacks the beta service scope; see [Gnani's Evon access page](https://www.gnani.ai/ja-jp/evon-waitlist).
 
 ### Frontend
 

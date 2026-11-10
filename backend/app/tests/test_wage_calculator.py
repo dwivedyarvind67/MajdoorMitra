@@ -6,7 +6,7 @@ At least 15 test cases with explicit expected values.
 
 import pytest
 from decimal import Decimal
-from app.services.wage_calculator import WageCalculator, quantize_money, ZERO
+from app.services.wage_calculator import FinancialService, WageCalculator, quantize_money, ZERO
 
 
 class TestCalculateWorkEntryTotal:
@@ -300,3 +300,47 @@ class TestQuantizeMoney:
 
     def test_already_decimal(self):
         assert quantize_money(Decimal("99.99")) == Decimal("99.99")
+
+
+class TestExplicitWageBreakdown:
+    def test_hourly_regular_and_overtime(self):
+        result = FinancialService.calculate_work_breakdown(
+            days_worked=0,
+            daily_wage=None,
+            wage_basis="hourly",
+            hourly_rate="100",
+            hours_worked="10",
+            overtime_hours="2",
+            overtime_multiplier="1.5",
+        )
+        assert result == {
+            "base_earned": Decimal("800.00"),
+            "overtime_earned": Decimal("300.00"),
+            "total_earned": Decimal("1100.00"),
+        }
+
+    def test_daily_wage_and_overtime_premium(self):
+        result = FinancialService.calculate_work_breakdown(
+            days_worked="1",
+            daily_wage="800",
+            overtime_hours="2",
+            overtime_multiplier="1.5",
+        )
+        assert result["base_earned"] == Decimal("800.00")
+        assert result["overtime_earned"] == Decimal("300.00")
+        assert result["total_earned"] == Decimal("1100.00")
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"days_worked": -1, "daily_wage": 800},
+            {"days_worked": 0, "daily_wage": 800, "hours_worked": 3, "overtime_hours": 4},
+            {"days_worked": 1, "daily_wage": 800, "overtime_multiplier": "0.5"},
+            {"days_worked": 0, "daily_wage": None, "wage_basis": "hourly", "hours_worked": 2},
+        ],
+    )
+    def test_invalid_wage_inputs_are_rejected(self, kwargs):
+        defaults = {"days_worked": 0, "daily_wage": 800}
+        defaults.update(kwargs)
+        with pytest.raises(ValueError):
+            FinancialService.calculate_work_breakdown(**defaults)

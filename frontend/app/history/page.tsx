@@ -1,22 +1,35 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { Suspense, useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../lib/auth-context';
 import { api } from '../../lib/api';
 import WorkHistory from '../../components/WorkHistory';
 import PaymentHistory from '../../components/PaymentHistory';
 import { WorkEntry, Payment } from '../../types';
-import { Briefcase, IndianRupee, ArrowLeft } from 'lucide-react';
+import { Briefcase, IndianRupee, ArrowLeft, Clock3 } from 'lucide-react';
+import WageStory from '../../components/WageStory';
 
 export default function HistoryPage() {
   const router = useRouter();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<'work' | 'payment'>('work');
+  const [activeTab, setActiveTab] = useState<'story' | 'work' | 'payment'>('story');
   const [workEntries, setWorkEntries] = useState<WorkEntry[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pageError, setPageError] = useState<string | null>(null);
+
+  const refreshHistory = useCallback(async () => {
+    const [wList, pList] = await Promise.all([api.getWorkEntries(), api.getPayments()]);
+    setWorkEntries(wList || []);
+    setPayments(pList || []);
+  }, []);
+
+  const handleAllocate = useCallback(async (paymentId: string, workEntryId: string, amount: string) => {
+    await api.allocatePayment(paymentId, workEntryId, amount);
+    await refreshHistory();
+  }, [refreshHistory]);
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -31,9 +44,10 @@ export default function HistoryPage() {
         if (!active) return;
         setWorkEntries(wList || []);
         setPayments(pList || []);
+        setPageError(null);
       })
       .catch((error: unknown) => {
-        if (active) console.error(error);
+        if (active) setPageError(error instanceof Error ? error.message : 'इतिहास लोड नहीं हुआ। फिर से कोशिश करें।');
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -44,53 +58,68 @@ export default function HistoryPage() {
   }, [isAuthenticated, authLoading, router]);
 
   return (
-    <div className="flex flex-col px-5 py-6 space-y-5">
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-5 pb-4 sm:px-7 md:px-0">
       {/* Header */}
       <div className="flex items-center gap-3">
         <button
           onClick={() => router.push('/dashboard')}
-          className="p-2 -ml-2 text-slate-600 hover:text-slate-900 rounded-full hover:bg-slate-100 transition"
+          aria-label="डैशबोर्ड पर वापस जाएँ"
+          className="-ml-2 flex h-11 w-11 items-center justify-center rounded-xl border border-[#e7e5dc] bg-[#fffefa] text-slate-600 transition hover:text-[#173b2f]"
         >
           <ArrowLeft className="w-5 h-5" />
         </button>
         <div>
-          <h1 className="text-xl font-black text-slate-900">लेन-देन इतिहास</h1>
-          <p className="text-xs text-slate-500">सभी काम और भुगतान के रिकॉर्ड</p>
+          <p className="text-sm font-extrabold text-[#9a6a2b]">आपके पुराने रिकॉर्ड</p>
+          <h1 className="text-2xl font-black tracking-tight text-[#173b2f] sm:text-3xl">लेन-देन इतिहास</h1>
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex bg-slate-100 p-1 rounded-xl">
+      <div role="group" aria-label="इतिहास का प्रकार" className="grid grid-cols-3 gap-1 rounded-2xl border border-[#e7e5dc] bg-[#eeeee8] p-1.5">
+        <button
+          onClick={() => setActiveTab('story')}
+          aria-pressed={activeTab === 'story'}
+          className={`flex min-h-12 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-extrabold transition sm:gap-2 sm:px-3 sm:text-sm ${activeTab === 'story' ? 'bg-[#fffefa] text-[#173b2f] shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+        >
+          <Clock3 className="h-4 w-4" /> कहानी
+        </button>
         <button
           onClick={() => setActiveTab('work')}
-          className={`flex-1 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition ${
+          aria-pressed={activeTab === 'work'}
+          className={`flex min-h-12 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-extrabold transition sm:gap-2 sm:px-3 sm:text-sm ${
             activeTab === 'work'
-              ? 'bg-white text-blue-700 shadow-sm'
+            ? 'bg-[#fffefa] text-[#173b2f] shadow-sm'
               : 'text-slate-600 hover:text-slate-900'
           }`}
         >
           <Briefcase className="w-4 h-4" />
-          काम का रिकॉर्ड ({workEntries.length})
+          काम <span className="rounded-full bg-black/5 px-2 py-0.5">{workEntries.length}</span>
         </button>
         <button
           onClick={() => setActiveTab('payment')}
-          className={`flex-1 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition ${
+          aria-pressed={activeTab === 'payment'}
+          className={`flex min-h-12 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-extrabold transition sm:gap-2 sm:px-3 sm:text-sm ${
             activeTab === 'payment'
-              ? 'bg-white text-emerald-700 shadow-sm'
+            ? 'bg-[#fffefa] text-[#173b2f] shadow-sm'
               : 'text-slate-600 hover:text-slate-900'
           }`}
         >
           <IndianRupee className="w-4 h-4" />
-          मिला भुगतान ({payments.length})
+          भुगतान <span className="rounded-full bg-black/5 px-2 py-0.5">{payments.length}</span>
         </button>
       </div>
 
       {/* Content */}
-      <div className="pt-2">
-        {activeTab === 'work' ? (
+      <div className="pt-1">
+        {pageError && <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">{pageError}</div>}
+        {activeTab === 'story' ? (
+          <Suspense fallback={<div role="status" className="rounded-2xl border border-[#e7e5dc] bg-[#fffefa] p-8 text-center text-sm font-semibold text-slate-600">आपका हिसाब तैयार हो रहा है…</div>}>
+            <WageStory />
+          </Suspense>
+        ) : activeTab === 'work' ? (
           <WorkHistory entries={workEntries} isLoading={loading} />
         ) : (
-          <PaymentHistory payments={payments} isLoading={loading} />
+          <PaymentHistory payments={payments} workEntries={workEntries} onAllocate={handleAllocate} isLoading={loading} />
         )}
       </div>
     </div>

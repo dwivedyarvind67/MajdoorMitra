@@ -62,3 +62,19 @@ def test_apply_correction():
     }
     updated = svc.apply_correction(extracted, "daily_wage", "750.00")
     assert updated["daily_wage"] == "750.00"
+
+
+def test_hourly_overtime_summary_uses_the_shared_financial_calculation():
+    message = ConversationService().generate_confirmation_message({
+        "intent": "log_work",
+        "wage_basis": "hourly",
+        "days_worked": "0",
+        "hours_worked": "10",
+        "hourly_rate": "100",
+        "overtime_hours": "2",
+        "overtime_multiplier": "1.5",
+        "work_date": "2026-11-10",
+    }, "en")
+    assert "Hours: 10 × ₹100 per hour" in message
+    assert "Overtime earnings: ₹300.00" in message
+    assert "Total earned: ₹1100.00" in message

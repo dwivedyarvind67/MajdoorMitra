@@ -7,17 +7,20 @@ duplicate prevention, and atomic transactions.
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import List, Optional, Dict, Any
-from sqlalchemy import select, and_, desc
+from sqlalchemy import select, and_, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
-from app.models.models import WorkEntry, Payment, Employer, VoiceStatement, StatementStatus, PaymentType
-from app.schemas.ledger import WorkEntryCreate, PaymentCreate, LedgerSummary, EmployerSummary, TransactionItem
+from app.models.models import AuditEvent, WorkEntry, Payment, PaymentAllocation, Employer, VoiceStatement, StatementStatus, PaymentType
+from app.schemas.ledger import WorkEntryCreate, PaymentCreate, PaymentAllocationCreate, LedgerSummary, EmployerSummary, TransactionItem
+from app.services.audit_service import AuditService
 from app.services.wage_calculator import WageCalculator, quantize_money
 
 
 class LedgerService:
     """Handles financial transactions, ledger persistence, and worker summaries."""
+
+    MAX_MONEY = Decimal("9999999999999.99")
 
     @staticmethod
     async def check_duplicate_work_entry(
@@ -99,9 +102,18 @@ class LedgerService:
 
         total_earned = WageCalculator.calculate_work_entry_total(
             days_worked=data.days_worked,
-            daily_wage=data.daily_wage,
+            daily_wage=data.daily_wage or Decimal("0"),
             hours_worked=data.hours_worked,
+            wage_basis=data.wage_basis,
+            hourly_rate=data.hourly_rate,
+            overtime_hours=data.overtime_hours,
+            overtime_multiplier=data.overtime_multiplier,
         )
+        if total_earned > cls.MAX_MONEY:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="The calculated total is above the supported range. Please check the days and wage rate.",
+            )
 
         entry = WorkEntry(
             worker_id=worker_id,
@@ -109,12 +121,37 @@ class LedgerService:
             work_date=work_dt,
             days_worked=data.days_worked,
             hours_worked=data.hours_worked,
-            daily_wage=data.daily_wage,
+            daily_wage=data.daily_wage or Decimal("0"),
+            wage_basis=data.wage_basis,
+            hourly_rate=data.hourly_rate,
+            overtime_hours=data.overtime_hours,
+            overtime_multiplier=data.overtime_multiplier,
             total_earned=total_earned,
             description=data.description,
             source_statement_id=source_statement_id,
         )
         session.add(entry)
+        await session.flush()
+        AuditService.record(
+            session,
+            worker_id,
+            "ledger.work_recorded",
+            "work_entry",
+            entry.id,
+            source_statement_id=source_statement_id,
+            details={
+                "work_date": data.work_date.isoformat(),
+                "employer_id": data.employer_id,
+                "days_worked": str(data.days_worked),
+                "hours_worked": str(data.hours_worked) if data.hours_worked is not None else None,
+                "daily_wage": str(data.daily_wage) if data.daily_wage is not None else None,
+                "wage_basis": data.wage_basis,
+                "hourly_rate": str(data.hourly_rate) if data.hourly_rate is not None else None,
+                "overtime_hours": str(data.overtime_hours),
+                "overtime_multiplier": str(data.overtime_multiplier),
+                "total_earned": str(total_earned),
+            },
+        )
         await session.flush()
         await session.refresh(entry)
         return entry
@@ -162,8 +199,107 @@ class LedgerService:
         )
         session.add(payment)
         await session.flush()
+        AuditService.record(
+            session,
+            worker_id,
+            "ledger.payment_recorded",
+            "payment",
+            payment.id,
+            source_statement_id=source_statement_id,
+            details={
+                "payment_date": data.payment_date.isoformat(),
+                "employer_id": data.employer_id,
+                "amount": str(amount),
+                "payment_type": payment_type.value,
+            },
+        )
+        await session.flush()
         await session.refresh(payment)
         return payment
+
+    @classmethod
+    async def allocate_payment(
+        cls,
+        session: AsyncSession,
+        worker_id: str,
+        payment_id: str,
+        data: PaymentAllocationCreate,
+    ) -> PaymentAllocation:
+        """Allocate part of a payment to one work entry without changing ledger totals."""
+        payment = (
+            await session.execute(
+                select(Payment)
+                .where(Payment.id == payment_id, Payment.worker_id == worker_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if payment is None:
+            raise HTTPException(status_code=404, detail="Payment not found.")
+
+        work_entry = (
+            await session.execute(
+                select(WorkEntry)
+                .where(WorkEntry.id == data.work_entry_id, WorkEntry.worker_id == worker_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if work_entry is None:
+            raise HTTPException(status_code=404, detail="Work entry not found.")
+        if payment.employer_id and payment.employer_id != work_entry.employer_id:
+            raise HTTPException(
+                status_code=422,
+                detail="Payment and work entry belong to different employers.",
+            )
+
+        payment_allocated = await session.scalar(
+            select(func.coalesce(func.sum(PaymentAllocation.amount), 0)).where(
+                PaymentAllocation.worker_id == worker_id,
+                PaymentAllocation.payment_id == payment.id,
+            )
+        )
+        work_allocated = await session.scalar(
+            select(func.coalesce(func.sum(PaymentAllocation.amount), 0)).where(
+                PaymentAllocation.worker_id == worker_id,
+                PaymentAllocation.work_entry_id == work_entry.id,
+            )
+        )
+        amount = quantize_money(data.amount)
+        payment_remaining = quantize_money(payment.amount - Decimal(str(payment_allocated or 0)))
+        work_remaining = quantize_money(work_entry.total_earned - Decimal(str(work_allocated or 0)))
+        if amount > payment_remaining:
+            raise HTTPException(
+                status_code=422,
+                detail=f"This payment has only Rs {payment_remaining} left to allocate.",
+            )
+        if amount > work_remaining:
+            raise HTTPException(
+                status_code=422,
+                detail=f"This work entry has only Rs {work_remaining} left to allocate.",
+            )
+
+        allocation = PaymentAllocation(
+            worker_id=worker_id,
+            payment_id=payment.id,
+            work_entry_id=work_entry.id,
+            amount=amount,
+        )
+        session.add(allocation)
+        await session.flush()
+        AuditService.record(
+            session,
+            worker_id,
+            "ledger.payment_allocated",
+            "payment_allocation",
+            allocation.id,
+            details={
+                "payment_id": payment.id,
+                "work_entry_id": work_entry.id,
+                "amount": str(amount),
+            },
+        )
+        await session.flush()
+        await session.refresh(allocation)
+        return allocation
 
     @staticmethod
     async def _validate_employer(
@@ -201,8 +337,8 @@ class LedgerService:
             pay_query = pay_query.where(Payment.payment_date >= start_date)
 
         if end_date:
-            work_query = work_query.where(WorkEntry.work_date <= end_date)
-            pay_query = pay_query.where(Payment.payment_date <= end_date)
+            work_query = work_query.where(WorkEntry.work_date < end_date)
+            pay_query = pay_query.where(Payment.payment_date < end_date)
 
         work_entries = (await session.execute(work_query)).scalars().all()
         payments = (await session.execute(pay_query)).scalars().all()
@@ -253,8 +389,8 @@ class LedgerService:
                 work_query = work_query.where(WorkEntry.work_date >= start_date)
                 pay_query = pay_query.where(Payment.payment_date >= start_date)
             if end_date:
-                work_query = work_query.where(WorkEntry.work_date <= end_date)
-                pay_query = pay_query.where(Payment.payment_date <= end_date)
+                work_query = work_query.where(WorkEntry.work_date < end_date)
+                pay_query = pay_query.where(Payment.payment_date < end_date)
             w_entries = (await session.execute(work_query)).scalars().all()
             p_entries = (await session.execute(pay_query)).scalars().all()
 
@@ -280,20 +416,30 @@ class LedgerService:
         session: AsyncSession,
         worker_id: str,
         limit: int = 50,
+        employer_id: Optional[str] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
     ) -> List[TransactionItem]:
         """Combined timeline of work entries and payments ordered by date."""
         w_stmt = (
             select(WorkEntry)
             .where(WorkEntry.worker_id == worker_id)
-            .order_by(desc(WorkEntry.work_date))
-            .limit(limit)
         )
         p_stmt = (
             select(Payment)
             .where(Payment.worker_id == worker_id)
-            .order_by(desc(Payment.payment_date))
-            .limit(limit)
         )
+        if employer_id:
+            w_stmt = w_stmt.where(WorkEntry.employer_id == employer_id)
+            p_stmt = p_stmt.where(Payment.employer_id == employer_id)
+        if start_date:
+            w_stmt = w_stmt.where(WorkEntry.work_date >= start_date)
+            p_stmt = p_stmt.where(Payment.payment_date >= start_date)
+        if end_date:
+            w_stmt = w_stmt.where(WorkEntry.work_date < end_date)
+            p_stmt = p_stmt.where(Payment.payment_date < end_date)
+        w_stmt = w_stmt.order_by(desc(WorkEntry.work_date)).limit(limit)
+        p_stmt = p_stmt.order_by(desc(Payment.payment_date)).limit(limit)
 
         w_list = (await session.execute(w_stmt)).scalars().all()
         p_list = (await session.execute(p_stmt)).scalars().all()
@@ -301,6 +447,37 @@ class LedgerService:
         # Fetch employers
         emp_stmt = select(Employer).where(Employer.worker_id == worker_id)
         emp_map = {e.id: e.name for e in (await session.execute(emp_stmt)).scalars().all()}
+
+        source_ids = {item.source_statement_id for item in [*w_list, *p_list] if item.source_statement_id}
+        statement_map = {}
+        corrected_statement_ids = set()
+        if source_ids:
+            statements = (
+                await session.execute(
+                    select(VoiceStatement).where(
+                        VoiceStatement.worker_id == worker_id,
+                        VoiceStatement.id.in_(source_ids),
+                    )
+                )
+            ).scalars().all()
+            statement_map = {statement.id: statement for statement in statements}
+            correction_rows = await session.execute(
+                select(AuditEvent.source_statement_id).where(
+                    AuditEvent.worker_id == worker_id,
+                    AuditEvent.source_statement_id.in_(source_ids),
+                    AuditEvent.event_type == "voice.correction_applied",
+                )
+            )
+            corrected_statement_ids = {row[0] for row in correction_rows.all()}
+
+        def provenance(source_statement_id: Optional[str]) -> dict:
+            statement = statement_map.get(source_statement_id) if source_statement_id else None
+            confirmed = bool(statement and statement.status == StatementStatus.CONFIRMED)
+            return {
+                "record_status": "worker_confirmed" if confirmed else "worker_reported",
+                "was_corrected": bool(source_statement_id and source_statement_id in corrected_statement_ids),
+                "confirmed_at": statement.confirmed_at if confirmed else None,
+            }
 
         items: List[TransactionItem] = []
         for w in w_list:
@@ -312,10 +489,16 @@ class LedgerService:
                     amount=w.total_earned,
                     days_worked=w.days_worked,
                     daily_wage=w.daily_wage,
+                    wage_basis=w.wage_basis,
+                    hourly_rate=w.hourly_rate,
+                    hours_worked=w.hours_worked,
+                    overtime_hours=w.overtime_hours,
+                    overtime_multiplier=w.overtime_multiplier,
                     employer_id=w.employer_id,
                     employer_name=emp_map.get(w.employer_id) if w.employer_id else None,
                     description=w.description or f"{w.days_worked} days @ Rs {w.daily_wage}",
                     source_statement_id=w.source_statement_id,
+                    **provenance(w.source_statement_id),
                 )
             )
 
@@ -331,6 +514,7 @@ class LedgerService:
                     employer_name=emp_map.get(p.employer_id) if p.employer_id else None,
                     description=p.notes or f"Payment ({p.payment_type})",
                     source_statement_id=p.source_statement_id,
+                    **provenance(p.source_statement_id),
                 )
             )
 

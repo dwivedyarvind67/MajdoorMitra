@@ -29,25 +29,26 @@ class WageCalculator:
         days_worked: Decimal | float | int | str,
         daily_wage: Decimal | float | int | str,
         hours_worked: Optional[Decimal | float | int | str] = None,
+        *,
+        wage_basis: str = "daily",
+        hourly_rate: Optional[Decimal | float | int | str] = None,
+        overtime_hours: Decimal | float | int | str = 0,
+        overtime_multiplier: Decimal | float | int | str = "1.5",
     ) -> Decimal:
         """
         Calculate total earned for a single work entry.
         Normally: days_worked * daily_wage.
         If days_worked is 0 and hours_worked is provided, calculate hourly based on standard 8-hour day.
         """
-        days = Decimal(str(days_worked)) if days_worked is not None else Decimal("0")
-        wage = Decimal(str(daily_wage)) if daily_wage is not None else Decimal("0")
-
-        if days > 0:
-            total = days * wage
-        elif hours_worked is not None and Decimal(str(hours_worked)) > 0:
-            hours = Decimal(str(hours_worked))
-            hourly_rate = wage / Decimal("8")
-            total = hours * hourly_rate
-        else:
-            total = Decimal("0")
-
-        return quantize_money(total)
+        return FinancialService.calculate_work_breakdown(
+            days_worked=days_worked,
+            daily_wage=daily_wage,
+            hours_worked=hours_worked,
+            wage_basis=wage_basis,
+            hourly_rate=hourly_rate,
+            overtime_hours=overtime_hours,
+            overtime_multiplier=overtime_multiplier,
+        )["total_earned"]
 
     @staticmethod
     def calculate_entry_total(days_worked: Decimal, daily_wage: Decimal) -> Decimal:
@@ -172,6 +173,86 @@ class WageCalculator:
             "total_work_days": total_days,
             "work_entries_count": len(work_entries),
             "payments_count": len(payments),
+        }
+
+
+class FinancialService:
+    """Shared Decimal-only financial rules used by API, ledger and statements."""
+
+    @staticmethod
+    def _decimal(value: Decimal | float | int | str | None, name: str) -> Decimal:
+        if value is None:
+            return Decimal("0")
+        try:
+            amount = value if isinstance(value, Decimal) else Decimal(str(value))
+        except Exception as exc:
+            raise ValueError(f"{name} must be a valid number") from exc
+        if not amount.is_finite():
+            raise ValueError(f"{name} must be finite")
+        return amount
+
+    @classmethod
+    def calculate_work_breakdown(
+        cls,
+        *,
+        days_worked: Decimal | float | int | str,
+        daily_wage: Decimal | float | int | str | None,
+        hours_worked: Optional[Decimal | float | int | str] = None,
+        wage_basis: str = "daily",
+        hourly_rate: Optional[Decimal | float | int | str] = None,
+        overtime_hours: Decimal | float | int | str = 0,
+        overtime_multiplier: Decimal | float | int | str = "1.5",
+    ) -> Dict[str, Decimal]:
+        """Return base pay, overtime premium and total with explicit rate semantics.
+
+        Daily work uses a standard 8-hour day for overtime. Legacy hourly records
+        with no hourly_rate continue to derive the rate from daily_wage / 8.
+        For hourly work, hours_worked includes overtime_hours.
+        """
+        days = cls._decimal(days_worked, "days_worked")
+        hours = cls._decimal(hours_worked, "hours_worked")
+        overtime = cls._decimal(overtime_hours, "overtime_hours")
+        daily_rate = cls._decimal(daily_wage, "daily_wage")
+        explicit_hourly_rate = cls._decimal(hourly_rate, "hourly_rate")
+        multiplier = cls._decimal(overtime_multiplier, "overtime_multiplier")
+
+        if min(days, hours, overtime, daily_rate, explicit_hourly_rate) < 0:
+            raise ValueError("Work units and wage rates cannot be negative")
+        if multiplier < 1 or multiplier > 3:
+            raise ValueError("overtime_multiplier must be between 1 and 3")
+        if overtime > 0 and hours == 0 and days == 0:
+            raise ValueError("Overtime requires recorded work hours or days")
+
+        if wage_basis == "hourly":
+            if explicit_hourly_rate <= 0 or hours <= 0 or days != 0:
+                raise ValueError("Hourly work requires a positive hourly rate and hours, with zero days")
+            if overtime > hours:
+                raise ValueError("Overtime hours cannot exceed total hours worked")
+            base_rate = explicit_hourly_rate
+            regular_hours = hours - overtime
+            base_earned = regular_hours * base_rate
+            overtime_earned = overtime * base_rate * multiplier
+        elif wage_basis == "daily":
+            if days > 0:
+                base_earned = days * daily_rate
+                base_rate = explicit_hourly_rate if explicit_hourly_rate > 0 else daily_rate / Decimal("8")
+                overtime_earned = overtime * base_rate * multiplier
+            elif hours > 0:
+                base_rate = explicit_hourly_rate if explicit_hourly_rate > 0 else daily_rate / Decimal("8")
+                if overtime > hours:
+                    raise ValueError("Overtime hours cannot exceed total hours worked")
+                base_earned = (hours - overtime) * base_rate
+                overtime_earned = overtime * base_rate * multiplier
+            else:
+                base_earned = Decimal("0")
+                overtime_earned = Decimal("0")
+        else:
+            raise ValueError("wage_basis must be 'daily' or 'hourly'")
+
+        return {
+            "base_earned": quantize_money(base_earned),
+            "overtime_earned": quantize_money(overtime_earned),
+            "total_earned": quantize_money(base_earned + overtime_earned),
         }
 
 

@@ -9,13 +9,15 @@ interface VoiceRecorderProps {
   isReady?: boolean;
 }
 
-const MAX_RECORDING_SECONDS = 60;
+// Gnani Prisma REST accepts short clips up to 30 seconds.
+const MAX_RECORDING_SECONDS = 30;
 const TARGET_SAMPLE_RATE = 16000;
 
 export default function VoiceRecorder({ onRecordingComplete, isProcessing, isReady = true }: VoiceRecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [duration, setDuration] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [isPreparing, setIsPreparing] = useState(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -83,10 +85,13 @@ export default function VoiceRecorder({ onRecordingComplete, isProcessing, isRea
           return;
         }
         try {
+          setIsPreparing(true);
           const wav = await convertToWav(recorded);
           await onRecordingComplete(wav);
         } catch {
           setError('आवाज़ तैयार नहीं हो पाई। कृपया छोटी रिकॉर्डिंग लेकर फिर कोशिश करें।');
+        } finally {
+          setIsPreparing(false);
         }
       };
 
@@ -134,7 +139,7 @@ export default function VoiceRecorder({ onRecordingComplete, isProcessing, isRea
   };
 
   return (
-    <section className="flex flex-col items-center rounded-3xl border border-slate-200 bg-white p-6 text-center shadow-sm">
+    <section className="mx-auto flex w-full max-w-xl flex-col items-center rounded-[2rem] border border-[#e7e5dc] bg-[#fffefa] p-5 text-center shadow-[0_18px_45px_rgba(40,54,43,0.07)] sm:p-8">
       {error && (
         <div role="alert" className="mb-4 flex w-full items-start gap-2 rounded-xl bg-red-50 p-3 text-left text-sm text-red-800">
           <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
@@ -142,20 +147,21 @@ export default function VoiceRecorder({ onRecordingComplete, isProcessing, isRea
         </div>
       )}
 
-      <div className="relative my-3">
+      <div className="relative my-4">
+        {!isRecording && !isProcessing && !isPreparing && <div className="absolute -inset-3 rounded-full border border-[#dce8d9]" aria-hidden="true" />}
         {isRecording && <div className="absolute -inset-3 animate-pulse rounded-full bg-red-100" aria-hidden="true" />}
         <button
           type="button"
           onClick={isRecording ? stopRecording : startRecording}
-          disabled={isProcessing || !isReady}
+          disabled={isProcessing || isPreparing || !isReady}
           aria-label={isRecording ? 'रिकॉर्डिंग रोकें' : 'आवाज़ रिकॉर्ड करें'}
           aria-pressed={isRecording}
-          className={`relative z-10 flex h-32 w-32 flex-col items-center justify-center rounded-full shadow-lg transition-transform focus:outline-none focus:ring-4 focus:ring-blue-300 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 ${
-            isRecording ? 'bg-red-700 text-white' : 'bg-blue-700 text-white hover:scale-105 active:scale-95'
+          className={`relative z-10 flex h-36 w-36 flex-col items-center justify-center rounded-full shadow-[0_12px_35px_rgba(23,59,47,0.24)] transition-transform focus:outline-none focus:ring-4 focus:ring-[#a6c5a7] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 sm:h-40 sm:w-40 ${
+            isRecording ? 'bg-[#a9362b] text-white' : 'bg-[#173b2f] text-white hover:scale-[1.04] active:scale-95'
           }`}
         >
-          {isProcessing ? <Loader2 className="h-12 w-12 animate-spin" aria-hidden="true" /> : isRecording ? <Square className="h-10 w-10 fill-current" aria-hidden="true" /> : <Mic className="h-14 w-14" aria-hidden="true" />}
-          <span className="mt-1 text-sm font-bold">{isProcessing ? 'जाँच रहे हैं' : isRecording ? 'रोकें' : 'बोलें'}</span>
+          {isProcessing || isPreparing ? <Loader2 className="h-12 w-12 animate-spin" aria-hidden="true" /> : isRecording ? <Square className="h-10 w-10 fill-current" aria-hidden="true" /> : <Mic className="h-14 w-14" aria-hidden="true" />}
+          <span className="mt-1 text-sm font-extrabold">{isProcessing ? 'जाँच रहे हैं' : isPreparing ? 'आवाज़ तैयार' : isRecording ? 'रोकें' : 'बोलें'}</span>
         </button>
       </div>
 
@@ -166,10 +172,12 @@ export default function VoiceRecorder({ onRecordingComplete, isProcessing, isRea
               <span className="h-3 w-3 animate-pulse rounded-full bg-red-700" aria-hidden="true" />
               <span className="font-mono text-xl font-bold">{formatDuration(duration)}</span>
             </div>
-            <p className="text-sm text-slate-700">बोलिए… अधिकतम 1 मिनट</p>
+            <p className="text-sm text-slate-700">बोलिए… अधिकतम 30 सेकंड</p>
           </div>
+        ) : isPreparing ? (
+          <p className="text-base font-semibold text-[#285c3d]">आवाज़ साफ़ की जा रही है…</p>
         ) : isProcessing ? (
-          <p className="text-base font-semibold text-blue-800">आवाज़ की जाँच हो रही है…</p>
+          <p className="text-base font-semibold text-[#285c3d]">आपकी बात समझी जा रही है…</p>
         ) : !isReady ? (
           <p className="text-base font-semibold text-slate-600">सत्र तैयार हो रहा है…</p>
         ) : (
@@ -192,7 +200,9 @@ export default function VoiceRecorder({ onRecordingComplete, isProcessing, isRea
 }
 
 async function convertToWav(blob: Blob): Promise<Blob> {
-  const audioContext = new AudioContext();
+  const AudioContextConstructor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextConstructor) throw new Error('ऑडियो रूपांतरण इस ब्राउज़र में उपलब्ध नहीं है।');
+  const audioContext = new AudioContextConstructor();
   let decoded: AudioBuffer;
   try {
     decoded = await audioContext.decodeAudioData(await blob.arrayBuffer());

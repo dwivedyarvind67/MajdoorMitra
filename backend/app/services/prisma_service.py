@@ -39,10 +39,14 @@ class PrismaService:
         lang_code = {"hi": "hi-IN", "en": "en-IN"}.get(language, "indic-auto")
         headers = {"X-API-Key-ID": self.api_key.strip()}
         files = {"audio_file": (filename, audio_data, content_type)}
-        data = {"model": "prisma-v3.0", "language_code": lang_code}
+        data = {
+            "model": "prisma-v3.0",
+            "language_code": lang_code,
+            "format": "transcribe",
+        }
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(self.api_url, headers=headers, files=files, data=data)
             if response.status_code != 200:
                 raise TranscriptionError(f"Gnani Prisma returned HTTP {response.status_code}.")

@@ -1,55 +1,52 @@
 'use client';
 
 import React from 'react';
-import { Users, ChevronRight } from 'lucide-react';
+import { Users } from 'lucide-react';
 import { EmployerSummary } from '../types';
 
 interface EmployerCardProps {
   summary: EmployerSummary;
-  onClick?: () => void;
 }
 
-export default function EmployerCard({ summary, onClick }: EmployerCardProps) {
+export default function EmployerCard({ summary }: EmployerCardProps) {
   const pendingNum = Number(summary.pending || 0);
 
   return (
-    <div
-      onClick={onClick}
-      className="p-4 bg-white rounded-2xl border border-slate-100 shadow-sm hover:border-blue-200 transition cursor-pointer text-left"
+    <article
+      className="rounded-2xl border border-[#e7e5dc] bg-[#fffefa] p-4 text-left shadow-[0_6px_20px_rgba(40,54,43,0.035)] transition hover:border-[#cad8c6] sm:p-5"
     >
-      <div className="flex items-center justify-between mb-3">
+      <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-slate-700">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#e8efe6] text-[#28734e]">
             <Users className="w-5 h-5" />
           </div>
           <div>
-            <h4 className="font-bold text-slate-800 text-sm">{summary.employer_name}</h4>
-            <span className="text-xs text-slate-400">{summary.total_work_days} दिन काम</span>
+            <h4 className="text-base font-extrabold text-[#173b2f]">{summary.employer_name}</h4>
+            <span className="text-sm text-slate-500">{summary.total_work_days} दिन काम</span>
           </div>
         </div>
-        <ChevronRight className="w-4 h-4 text-slate-400" />
       </div>
 
-      <div className="grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 text-sm sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 border-t border-[#eeece4] pt-3 text-sm sm:grid-cols-4">
         <div>
-          <span className="text-slate-400">कमाई</span>
-          <p className="font-bold text-slate-700">₹{summary.total_earned}</p>
+          <span className="text-slate-500">कमाई</span>
+          <p className="font-extrabold text-slate-800">₹{summary.total_earned}</p>
         </div>
         <div>
-          <span className="text-slate-400">मिला</span>
-          <p className="font-bold text-emerald-700">₹{summary.total_received}</p>
+          <span className="text-slate-500">मिला</span>
+          <p className="font-extrabold text-[#28734e]">₹{summary.total_received}</p>
         </div>
         <div>
           <span className="text-slate-500">अग्रिम</span>
-          <p className="font-bold text-blue-800">₹{summary.total_advances || '0.00'}</p>
+          <p className="font-extrabold text-[#81581f]">₹{summary.total_advances || '0.00'}</p>
         </div>
         <div>
           <span className="text-slate-500">मिलना बाकी</span>
-          <p className={`font-bold ${pendingNum > 0 ? 'text-amber-700' : 'text-slate-600'}`}>
+          <p className={`font-extrabold ${pendingNum > 0 ? 'text-[#93601c]' : 'text-slate-600'}`}>
             ₹{summary.pending}
           </p>
         </div>
       </div>
-    </div>
+    </article>
   );
 }

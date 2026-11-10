@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -83,6 +84,7 @@ class Worker(Base):
     payments = relationship("Payment", back_populates="worker", lazy="selectin")
     voice_statements = relationship("VoiceStatement", back_populates="worker", lazy="selectin")
     evidence_files = relationship("EvidenceFile", back_populates="worker", lazy="selectin")
+    audit_events = relationship("AuditEvent", back_populates="worker", lazy="selectin")
 
 
 class Employer(Base):
@@ -126,6 +128,10 @@ class WorkEntry(Base):
     work_date = Column(DateTime(timezone=True), nullable=False)
     days_worked = Column(Numeric(15, 2), nullable=False)
     hours_worked = Column(Numeric(15, 2), nullable=True)
+    wage_basis = Column(String(10), nullable=False, default="daily", server_default="daily")
+    hourly_rate = Column(Numeric(15, 2), nullable=True)
+    overtime_hours = Column(Numeric(15, 2), nullable=False, default=0, server_default="0")
+    overtime_multiplier = Column(Numeric(4, 2), nullable=False, default=1.5, server_default="1.5")
     daily_wage = Column(Numeric(15, 2), nullable=False)
     total_earned = Column(Numeric(15, 2), nullable=False)
     description = Column(Text, nullable=True)
@@ -140,6 +146,13 @@ class WorkEntry(Base):
     worker = relationship("Worker", back_populates="work_entries")
     employer = relationship("Employer", back_populates="work_entries")
     source_statement = relationship("VoiceStatement", back_populates="work_entries")
+    payment_allocations = relationship("PaymentAllocation", back_populates="work_entry", lazy="selectin")
+    __table_args__ = (
+        CheckConstraint("wage_basis IN ('daily', 'hourly')", name="ck_work_entries_wage_basis_allowed"),
+        CheckConstraint("hourly_rate IS NULL OR hourly_rate > 0", name="ck_work_entries_hourly_rate_positive"),
+        CheckConstraint("overtime_hours >= 0", name="ck_work_entries_overtime_non_negative"),
+        CheckConstraint("overtime_multiplier >= 1 AND overtime_multiplier <= 3", name="ck_work_entries_overtime_multiplier"),
+    )
 
 
 class Payment(Base):
@@ -181,6 +194,30 @@ class Payment(Base):
     worker = relationship("Worker", back_populates="payments")
     employer = relationship("Employer", back_populates="payments")
     source_statement = relationship("VoiceStatement", back_populates="payments")
+    allocations = relationship("PaymentAllocation", back_populates="payment", lazy="selectin")
+
+
+class PaymentAllocation(Base):
+    """A transparent partial allocation of a received payment to work owed."""
+    __tablename__ = "payment_allocations"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    worker_id = Column(
+        String(36), ForeignKey("workers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    payment_id = Column(
+        String(36), ForeignKey("payments.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    work_entry_id = Column(
+        String(36), ForeignKey("work_entries.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    amount = Column(Numeric(15, 2), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    worker = relationship("Worker")
+    payment = relationship("Payment", back_populates="allocations")
+    work_entry = relationship("WorkEntry", back_populates="payment_allocations")
+    __table_args__ = (CheckConstraint("amount > 0", name="ck_payment_allocations_positive_amount"),)
 
 
 class VoiceStatement(Base):
@@ -237,3 +274,33 @@ class EvidenceFile(Base):
     # Relationships
     worker = relationship("Worker", back_populates="evidence_files")
     statement = relationship("VoiceStatement", back_populates="evidence_files")
+
+
+class AuditEvent(Base):
+    """Append-only event log for worker-owned records and voice workflow changes."""
+    __tablename__ = "audit_events"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    worker_id = Column(
+        String(36),
+        ForeignKey("workers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    event_type = Column(String(80), nullable=False)
+    entity_type = Column(String(80), nullable=False)
+    entity_id = Column(String(36), nullable=False)
+    source_statement_id = Column(
+        String(36),
+        ForeignKey("voice_statements.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    details = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    worker = relationship("Worker", back_populates="audit_events")
+    __table_args__ = (
+        Index("ix_audit_events_worker_created", "worker_id", "created_at"),
+        Index("ix_audit_events_entity", "entity_type", "entity_id"),
+    )

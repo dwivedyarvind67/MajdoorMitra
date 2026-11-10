@@ -34,7 +34,13 @@ export interface WorkEntry {
   days_worked: string;
   hours_worked?: string;
   daily_wage: string;
+  wage_basis?: 'daily' | 'hourly';
+  hourly_rate?: string;
+  overtime_hours?: string;
+  overtime_multiplier?: string;
   total_earned: string;
+  allocated_amount?: string;
+  outstanding_amount?: string;
   description?: string;
   source_statement_id?: string;
   created_at: string;
@@ -46,6 +52,8 @@ export interface Payment {
   employer_id?: string;
   employer_name?: string;
   amount: string;
+  allocated_amount?: string;
+  unallocated_amount?: string;
   payment_date: string;
   payment_type: PaymentType;
   notes?: string;
@@ -84,11 +92,19 @@ export interface TransactionItem {
   amount: string;
   days_worked?: string;
   daily_wage?: string;
+  wage_basis?: 'daily' | 'hourly';
+  hourly_rate?: string;
+  hours_worked?: string;
+  overtime_hours?: string;
+  overtime_multiplier?: string;
   payment_type?: string;
   employer_id?: string;
   employer_name?: string;
   description?: string;
   source_statement_id?: string;
+  record_status: 'worker_reported' | 'worker_confirmed';
+  was_corrected: boolean;
+  confirmed_at?: string | null;
 }
 
 export interface ExtractionResult {
@@ -96,6 +112,22 @@ export interface ExtractionResult {
   days_worked?: string | number | null;
   daily_wage?: string | number | null;
   hours_worked?: string | number | null;
+  wage_basis?: 'daily' | 'hourly';
+  hourly_rate?: string | number | null;
+  overtime_hours?: string | number | null;
+  overtime_multiplier?: string | number | null;
+  base_earned?: string | number | null;
+  overtime_earned?: string | number | null;
+  calculated_total?: string | number | null;
+  possible_duplicates?: Array<{
+    kind: 'work' | 'payment';
+    record_id: string;
+    date: string;
+    employer_name?: string | null;
+    amount: string;
+    exact: boolean;
+    message: string;
+  }>;
   work_date?: string | null;
   amount_received?: string | number | null;
   payment_type?: PaymentType | null;
@@ -166,4 +198,23 @@ export interface StatementDetail extends StatementListItem {
 export interface TransactionList {
   transactions: TransactionItem[];
   total_count: number;
+}
+
+export interface LedgerAlert {
+  id: string;
+  alert_type: 'recorded_balance' | 'unallocated_payment' | 'possible_duplicate' | 'rate_change' | 'possible_overpayment';
+  severity: 'review' | 'information';
+  employer_id?: string | null;
+  employer_name?: string | null;
+  amount?: string | null;
+  source_record_ids: string[];
+  source_records: Array<{
+    id: string;
+    record_type: 'work' | 'payment';
+    date: string;
+    amount: string;
+    description?: string | null;
+  }>;
+  explanation: string;
+  recommendation: string;
 }

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.connection import get_db
 from app.models.models import Employer
 from app.schemas.employer import EmployerCreate, EmployerResponse
+from app.services.audit_service import AuditService
 from app.utils.auth import get_current_worker_id
 
 router = APIRouter(prefix="/api/employers", tags=["employers"])
@@ -60,6 +61,15 @@ async def create_employer(
         created_at=datetime.now(timezone.utc),
     )
     db.add(employer)
+    await db.flush()
+    AuditService.record(
+        db,
+        worker_id,
+        "employer.created",
+        "employer",
+        employer.id,
+        details={"name": employer.name},
+    )
     await db.commit()
     await db.refresh(employer)
     return employer

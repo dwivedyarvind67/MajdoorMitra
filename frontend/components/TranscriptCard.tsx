@@ -12,19 +12,19 @@ export default function TranscriptCard({ transcript, language }: TranscriptCardP
   if (!transcript) return null;
 
   return (
-    <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 my-3 text-left">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-bold text-blue-800 flex items-center gap-1.5 uppercase tracking-wide">
+    <section className="my-3 rounded-2xl border border-[#dce5d8] bg-[#f4f7f0] p-4 text-left sm:p-5" aria-label="मूल आवाज़ का लेखा">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="flex items-center gap-2 text-sm font-extrabold text-[#285c3d]">
           <MessageSquare className="w-4 h-4" />
-          आपकी बात (Your Statement)
+          आपकी मूल बात
         </span>
-        <span className="text-[11px] bg-blue-200 text-blue-900 px-2 py-0.5 rounded-full font-medium">
+        <span className="rounded-full bg-white px-2.5 py-1 text-xs font-bold text-slate-700">
           {language === 'hi' ? 'हिंदी' : 'English'}
         </span>
       </div>
-      <p className="text-slate-800 font-medium text-base leading-relaxed">
+      <p className="text-base font-medium leading-7 text-slate-900 sm:text-lg">
         &ldquo;{transcript}&rdquo;
       </p>
-    </div>
+    </section>
   );
 }

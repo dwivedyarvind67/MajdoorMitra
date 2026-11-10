@@ -14,6 +14,11 @@ class TranscriptionError(Exception):
 
 
 class PrismaService:
+    LANGUAGE_CODES = {
+        "bn": "bn-IN", "en": "en-IN", "gu": "gu-IN", "hi": "hi-IN",
+        "kn": "kn-IN", "ml": "ml-IN", "mr": "mr-IN", "pa": "pa-IN",
+        "ta": "ta-IN", "te": "te-IN",
+    }
     def __init__(self):
         settings = get_settings()
         self.api_key = settings.GNANI_PRISMA_API_KEY
@@ -36,13 +41,19 @@ class PrismaService:
         if not audio_data:
             raise TranscriptionError("The audio recording is empty.")
 
-        lang_code = {"hi": "hi-IN", "en": "en-IN"}.get(language, "indic-auto")
+        normalized_language = language.strip().lower()
+        is_hinglish = normalized_language == "hinglish"
+        lang_code = (
+            "hi-IN,en-IN" if is_hinglish
+            else "indic-auto" if normalized_language == "auto"
+            else self.LANGUAGE_CODES.get(normalized_language, normalized_language)
+        )
         headers = {"X-API-Key-ID": self.api_key.strip()}
         files = {"audio_file": (filename, audio_data, content_type)}
         data = {
             "model": "prisma-v3.0",
             "language_code": lang_code,
-            "format": "transcribe",
+            "format": "codemix" if is_hinglish else "transcribe",
         }
 
         try:

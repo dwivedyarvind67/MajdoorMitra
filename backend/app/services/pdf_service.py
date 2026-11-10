@@ -167,25 +167,32 @@ class PDFService:
         # Work Entries Table
         if work_entries:
             elements.append(Paragraph("Work Entries / काम का विवरण", heading_style))
-            work_header = ["Date", "Days", "Wage/Day", "Total", "Description"]
+            work_header = ["Date", "Work / Rate", "Earned", "Record status", "Description"]
             work_rows = [work_header]
             for entry in work_entries:
                 work_date = entry.get("work_date", "")
                 if isinstance(work_date, datetime):
                     work_date = work_date.strftime("%d/%m/%Y")
+                if entry.get("wage_basis") == "hourly":
+                    detail = f"{entry.get('hours_worked', 0)} h × {self.format_inr(entry.get('hourly_rate', 0))}/h"
+                else:
+                    detail = f"{entry.get('days_worked', 0)} days × {self.format_inr(entry.get('daily_wage', 0))}/day"
+                if Decimal(str(entry.get("overtime_hours", 0) or 0)) > 0:
+                    detail += f"; OT {entry.get('overtime_hours')} h × {entry.get('overtime_multiplier', '1.5')}"
                 work_rows.append([
                     str(work_date),
-                    str(entry.get("days_worked", "")),
-                    self.format_inr(entry.get("daily_wage", 0)),
                     self.format_inr(entry.get("total_earned", 0)),
+                    escape(detail),
+                    escape(str(entry.get("record_status", "worker reported"))),
                     escape(str(entry.get("description", "") or "")),
                 ])
 
-            work_table = Table(work_rows, colWidths=[2.5*cm, 1.5*cm, 2.5*cm, 2.5*cm, 6*cm])
+            work_rows = [work_header] + [[row[0], row[2], row[1], row[3], row[4]] for row in work_rows[1:]]
+            work_table = Table(work_rows, colWidths=[2*cm, 4.5*cm, 2.5*cm, 2.3*cm, 4.2*cm])
             work_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('ALIGN', (1, 0), (3, -1), 'RIGHT'),
+                ('ALIGN', (2, 0), (2, -1), 'RIGHT'),
                 ('FONTSIZE', (0, 0), (-1, -1), 9),
                 ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
                 ('TOPPADDING', (0, 0), (-1, -1), 3),
@@ -198,7 +205,7 @@ class PDFService:
         # Payments Table
         if payments:
             elements.append(Paragraph("Payments / भुगतान विवरण", heading_style))
-            pay_header = ["Date", "Amount", "Type", "Notes"]
+            pay_header = ["Date", "Amount", "Type", "Record status", "Notes"]
             pay_rows = [pay_header]
             for payment in payments:
                 pay_date = payment.get("payment_date", "")
@@ -208,10 +215,11 @@ class PDFService:
                     str(pay_date),
                     self.format_inr(payment.get("amount", 0)),
                     str(payment.get("payment_type", "")),
+                    escape(str(payment.get("record_status", "worker reported"))),
                     escape(str(payment.get("notes", "") or "")),
                 ])
 
-            pay_table = Table(pay_rows, colWidths=[2.5*cm, 3*cm, 2.5*cm, 7*cm])
+            pay_table = Table(pay_rows, colWidths=[2*cm, 2.5*cm, 2*cm, 2.3*cm, 6.7*cm])
             pay_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),

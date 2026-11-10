@@ -18,6 +18,9 @@ from app.api.ledger import router as ledger_router
 from app.api.payments import router as payments_router
 from app.api.employers import router as employers_router
 from app.api.statements import router as statements_router
+from app.api.evidence import router as evidence_router
+from app.api.insights import router as insights_router
+from app.api.assistance import router as assistance_router
 
 
 @asynccontextmanager
@@ -50,6 +53,9 @@ app.include_router(ledger_router)
 app.include_router(payments_router)
 app.include_router(employers_router)
 app.include_router(statements_router)
+app.include_router(evidence_router)
+app.include_router(insights_router)
+app.include_router(assistance_router)
 
 
 @app.get("/health", tags=["health"])

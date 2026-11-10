@@ -251,7 +251,7 @@ export default function VoicePage() {
           type="button"
           onClick={() => router.push('/dashboard')}
           aria-label="डैशबोर्ड पर वापस जाएँ"
-          className="flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-[#e4e2da] bg-[#fffefa] text-slate-700 shadow-sm transition hover:bg-white"
+          className="flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-[#e4e4e7] bg-[#ffffff] text-slate-700 shadow-sm transition hover:bg-white"
         >
           <ArrowLeft className="h-5 w-5" aria-hidden="true" />
         </button>
@@ -271,8 +271,8 @@ export default function VoicePage() {
       </div>
 
       <header className="mb-6 text-center">
-        <span className="text-sm font-extrabold tracking-wide text-[#9a6a2b]">आपका हिसाब · आवाज़ से</span>
-        <h1 className="mt-1 text-3xl font-black tracking-tight text-[#173b2f] sm:text-4xl">बोलकर रिकॉर्ड करें</h1>
+        <span className="text-sm font-extrabold tracking-wide text-[#71717a]">आपका हिसाब · आवाज़ से</span>
+        <h1 className="mt-1 text-3xl font-black tracking-tight text-[#27272a] sm:text-4xl">बोलकर रिकॉर्ड करें</h1>
         <p className="mt-2 text-base leading-7 text-slate-600 sm:text-lg">काम, दिहाड़ी या मिला हुआ पैसा अपनी भाषा में बताइए।</p>
       </header>
 
@@ -282,8 +282,8 @@ export default function VoicePage() {
           { label: 'जाँचें', complete: ['READY_FOR_CONFIRMATION', 'CONFIRMED'].includes(status) },
           { label: 'पुष्टि करें', complete: status === 'CONFIRMED' },
         ].map((step, index) => (
-          <li key={step.label} className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-bold ${step.complete ? 'border-[#cadfc9] bg-[#eaf2e7] text-[#285c3d]' : index === 0 ? 'border-[#173b2f] bg-[#173b2f] text-white' : 'border-[#e7e5dc] bg-[#fffefa] text-slate-500'}`}>
-            <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs ${step.complete ? 'bg-[#28734e] text-white' : index === 0 ? 'bg-white/15 text-white' : 'bg-[#efeee8] text-slate-500'}`}>{index + 1}</span>
+          <li key={step.label} className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-bold ${step.complete ? 'border-[#e4e4e7] bg-[#f4f4f5] text-[#52525b]' : index === 0 ? 'border-[#27272a] bg-[#27272a] text-white' : 'border-[#e4e4e7] bg-[#ffffff] text-slate-500'}`}>
+            <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs ${step.complete ? 'bg-[#52525b] text-white' : index === 0 ? 'bg-white/15 text-white' : 'bg-[#f4f4f5] text-slate-500'}`}>{index + 1}</span>
             <span className="truncate">{step.label}</span>
           </li>
         ))}

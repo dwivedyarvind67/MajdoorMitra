@@ -14,7 +14,7 @@ export default function WorkHistory({ entries, isLoading }: WorkHistoryProps) {
     return (
       <div className="space-y-3">
         {[1, 2, 3].map((i) => (
-          <div key={i} className="h-20 animate-pulse rounded-2xl border border-[#e7e5dc] bg-[#fffefa]"></div>
+          <div key={i} className="h-20 animate-pulse rounded-2xl border border-[#e4e4e7] bg-[#ffffff]"></div>
         ))}
       </div>
     );
@@ -22,9 +22,9 @@ export default function WorkHistory({ entries, isLoading }: WorkHistoryProps) {
 
   if (!entries || entries.length === 0) {
     return (
-      <div className="rounded-3xl border border-dashed border-[#d9ddd3] bg-[#fffefa] py-10 text-center text-slate-600">
-        <Briefcase className="mx-auto mb-3 h-9 w-9 text-[#28734e]" />
-        <p className="text-base font-bold text-[#173b2f]">अभी कोई काम का रिकॉर्ड नहीं</p>
+      <div className="rounded-3xl border border-dashed border-[#e4e4e7] bg-[#ffffff] py-10 text-center text-slate-600">
+        <Briefcase className="mx-auto mb-3 h-9 w-9 text-[#52525b]" />
+        <p className="text-base font-bold text-[#27272a]">अभी कोई काम का रिकॉर्ड नहीं</p>
         <p className="mt-1 text-sm">काम दर्ज होने के बाद वह यहाँ दिखाई देगा।</p>
       </div>
     );
@@ -42,14 +42,14 @@ export default function WorkHistory({ entries, isLoading }: WorkHistoryProps) {
         return (
           <div
             key={w.id}
-            className="flex min-w-0 items-center justify-between gap-3 rounded-2xl border border-[#e7e5dc] bg-[#fffefa] p-4 shadow-[0_6px_20px_rgba(40,54,43,0.035)] sm:p-5"
+            className="flex min-w-0 items-center justify-between gap-3 rounded-2xl border border-[#e4e4e7] bg-[#ffffff] p-4 shadow-[0_6px_20px_rgba(24,24,27,0.035)] sm:p-5"
           >
             <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#e8efe6] text-[#28734e]">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#f4f4f5] text-[#52525b]">
                 <Briefcase className="w-5 h-5" />
               </div>
               <div className="text-left">
-                <h4 className="text-base font-extrabold text-[#173b2f]">
+                <h4 className="text-base font-extrabold text-[#27272a]">
                   {w.employer_name || 'मालिक का नाम नहीं'}
                 </h4>
                 <div className="mt-1 flex flex-wrap items-center gap-1.5 text-sm text-slate-600">
@@ -69,7 +69,7 @@ export default function WorkHistory({ entries, isLoading }: WorkHistoryProps) {
             </div>
 
             <div className="text-right">
-              <span className="shrink-0 text-base font-black text-[#28734e] sm:text-lg">
+              <span className="shrink-0 text-base font-black text-[#52525b] sm:text-lg">
                 ₹{w.total_earned}
               </span>
             </div>

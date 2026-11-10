@@ -64,22 +64,22 @@ export default function HistoryPage() {
         <button
           onClick={() => router.push('/dashboard')}
           aria-label="डैशबोर्ड पर वापस जाएँ"
-          className="-ml-2 flex h-11 w-11 items-center justify-center rounded-xl border border-[#e7e5dc] bg-[#fffefa] text-slate-600 transition hover:text-[#173b2f]"
+          className="-ml-2 flex h-11 w-11 items-center justify-center rounded-xl border border-[#e4e4e7] bg-[#ffffff] text-slate-600 transition hover:text-[#27272a]"
         >
           <ArrowLeft className="w-5 h-5" />
         </button>
         <div>
-          <p className="text-sm font-extrabold text-[#9a6a2b]">आपके पुराने रिकॉर्ड</p>
-          <h1 className="text-2xl font-black tracking-tight text-[#173b2f] sm:text-3xl">लेन-देन इतिहास</h1>
+          <p className="text-sm font-extrabold text-[#71717a]">आपके पुराने रिकॉर्ड</p>
+          <h1 className="text-2xl font-black tracking-tight text-[#27272a] sm:text-3xl">लेन-देन इतिहास</h1>
         </div>
       </div>
 
       {/* Tabs */}
-      <div role="group" aria-label="इतिहास का प्रकार" className="grid grid-cols-3 gap-1 rounded-2xl border border-[#e7e5dc] bg-[#eeeee8] p-1.5">
+      <div role="group" aria-label="इतिहास का प्रकार" className="grid grid-cols-3 gap-1 rounded-2xl border border-[#e4e4e7] bg-[#e4e4e7] p-1.5">
         <button
           onClick={() => setActiveTab('story')}
           aria-pressed={activeTab === 'story'}
-          className={`flex min-h-12 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-extrabold transition sm:gap-2 sm:px-3 sm:text-sm ${activeTab === 'story' ? 'bg-[#fffefa] text-[#173b2f] shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+          className={`flex min-h-12 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-extrabold transition sm:gap-2 sm:px-3 sm:text-sm ${activeTab === 'story' ? 'bg-[#ffffff] text-[#27272a] shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
         >
           <Clock3 className="h-4 w-4" /> कहानी
         </button>
@@ -88,7 +88,7 @@ export default function HistoryPage() {
           aria-pressed={activeTab === 'work'}
           className={`flex min-h-12 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-extrabold transition sm:gap-2 sm:px-3 sm:text-sm ${
             activeTab === 'work'
-            ? 'bg-[#fffefa] text-[#173b2f] shadow-sm'
+            ? 'bg-[#ffffff] text-[#27272a] shadow-sm'
               : 'text-slate-600 hover:text-slate-900'
           }`}
         >
@@ -100,7 +100,7 @@ export default function HistoryPage() {
           aria-pressed={activeTab === 'payment'}
           className={`flex min-h-12 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-extrabold transition sm:gap-2 sm:px-3 sm:text-sm ${
             activeTab === 'payment'
-            ? 'bg-[#fffefa] text-[#173b2f] shadow-sm'
+            ? 'bg-[#ffffff] text-[#27272a] shadow-sm'
               : 'text-slate-600 hover:text-slate-900'
           }`}
         >
@@ -113,7 +113,7 @@ export default function HistoryPage() {
       <div className="pt-1">
         {pageError && <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">{pageError}</div>}
         {activeTab === 'story' ? (
-          <Suspense fallback={<div role="status" className="rounded-2xl border border-[#e7e5dc] bg-[#fffefa] p-8 text-center text-sm font-semibold text-slate-600">आपका हिसाब तैयार हो रहा है…</div>}>
+          <Suspense fallback={<div role="status" className="rounded-2xl border border-[#e4e4e7] bg-[#ffffff] p-8 text-center text-sm font-semibold text-slate-600">आपका हिसाब तैयार हो रहा है…</div>}>
             <WageStory />
           </Suspense>
         ) : activeTab === 'work' ? (

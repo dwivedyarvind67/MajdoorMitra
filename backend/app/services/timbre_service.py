@@ -22,13 +22,21 @@ class TimbreService:
         if not self.api_url or not self.api_url.strip():
             raise ConfigurationError("Gnani Timbre API URL is not configured.")
 
-    async def speak(self, text: str, language: str = "hi") -> bytes:
+    async def speak(
+        self,
+        text: str,
+        language: str = "hi",
+        model: str = "timbre-v2.5",
+        voice: str | None = None,
+        speed: float = 1.0,
+    ) -> bytes:
         self._check_config()
         if not text.strip():
             raise TTSError("There is no text to speak.")
 
-        lang_code = "hi-IN" if language == "hi" else "en-IN"
-        voice_name = "Nalini" if language == "hi" else "Kaveri"
+        aliases = {"hi": "hi-IN", "en": "en-IN"}
+        lang_code = aliases.get(language, language)
+        voice_name = voice or ("Nalini" if lang_code == "hi-IN" else "Kaveri")
         headers = {
             "X-API-Key-ID": self.api_key.strip(),
             "Content-Type": "application/json",
@@ -36,9 +44,9 @@ class TimbreService:
         payload = {
             "text": text,
             "voice": voice_name,
-            "model": "timbre-v2.5",
+            "model": model,
             "language": lang_code,
-            "speed": 1.0,
+            "speed": speed,
             "audio_config": {
                 "encoding": "linear_pcm",
                 "container": "wav",

@@ -64,6 +64,32 @@ async def test_prisma_uses_documented_rest_multipart_contract(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_prisma_hinglish_uses_documented_v3_codemix_format(monkeypatch):
+    client = MockClient(MockResponse(body={"transcript": "Kal 2 din kaam kiya"}))
+    monkeypatch.setattr("app.services.prisma_service.httpx.AsyncClient", lambda **_kwargs: client)
+    service = configured(monkeypatch, PrismaService, "https://api.vachana.ai/stt/v3")
+
+    await service.transcribe(b"audio", "hinglish")
+
+    assert client.calls[0][1]["data"] == {
+        "model": "prisma-v3.0",
+        "language_code": "hi-IN,en-IN",
+        "format": "codemix",
+    }
+
+
+@pytest.mark.asyncio
+async def test_prisma_maps_all_verified_indic_locales(monkeypatch):
+    client = MockClient(MockResponse(body={"transcript": "நான் வேலை செய்தேன்"}))
+    monkeypatch.setattr("app.services.prisma_service.httpx.AsyncClient", lambda **_kwargs: client)
+    service = configured(monkeypatch, PrismaService, "https://api.vachana.ai/stt/v3")
+
+    await service.transcribe(b"audio", "ta")
+
+    assert client.calls[0][1]["data"]["language_code"] == "ta-IN"
+
+
+@pytest.mark.asyncio
 async def test_timbre_uses_documented_rest_contract_and_english_voice(monkeypatch):
     response = MockResponse(content=b"RIFF\x00\x00\x00\x00WAVEaudio")
     client = MockClient(response)
@@ -81,6 +107,22 @@ async def test_timbre_uses_documented_rest_contract_and_english_voice(monkeypatc
     assert kwargs["json"]["voice"] == "Kaveri"
     assert kwargs["json"]["language"] == "en-IN"
     assert audio.startswith(b"RIFF")
+
+
+@pytest.mark.asyncio
+async def test_timbre_accepts_verified_v3_voice_language_and_speed(monkeypatch):
+    response = MockResponse(content=b"RIFF\x00\x00\x00\x00WAVEaudio")
+    client = MockClient(response)
+    monkeypatch.setattr("app.services.timbre_service.httpx.AsyncClient", lambda **_kwargs: client)
+    service = configured(monkeypatch, TimbreService, "https://api.vachana.ai/api/v1/tts/inference")
+
+    await service.speak("नमस्ते", language="hi-IN", model="timbre-v3.0", voice="Shivani", speed=0.9)
+
+    payload = client.calls[0][1]["json"]
+    assert payload["model"] == "timbre-v3.0"
+    assert payload["voice"] == "Shivani"
+    assert payload["language"] == "hi-IN"
+    assert payload["speed"] == 0.9
 
 
 @pytest.mark.asyncio
@@ -111,4 +153,30 @@ async def test_evon_http_403_is_a_real_provider_failure_not_a_fallback(monkeypat
 
     with pytest.raises(ExtractionError, match="HTTP 403"):
         await service.extract("दो दिन काम किया", "hi")
+
+
+@pytest.mark.asyncio
+async def test_evon_transformers_backend_uses_local_generation_without_api_call(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "GNANI_EVON_BACKEND", "transformers")
+    monkeypatch.setattr(settings, "GNANI_EVON_MODEL_ID", "gnani/gnani-evon-v3.3-30B-A3B")
+    monkeypatch.setattr(
+        "app.services.evon_service._generate_with_transformers",
+        lambda messages, model_id: '{"intent":"log_work","days_worked":2}',
+    )
+    service = EvonService()
+
+    result = await service.extract("दो दिन काम किया", "hi")
+
+    assert result == {"intent": "log_work", "days_worked": 2}
+
+
+def test_evon_transformers_backend_rejects_unsupported_windows_host_cleanly(monkeypatch):
+    from app.services.evon_service import _generate_with_transformers
+    from app.services.prisma_service import ConfigurationError
+
+    monkeypatch.setattr("app.services.evon_service.platform.system", lambda: "Windows")
+    with pytest.raises(ConfigurationError, match="supported on Linux"):
+        _generate_with_transformers([], "gnani/gnani-evon-v3.3-30B-A3B")
 

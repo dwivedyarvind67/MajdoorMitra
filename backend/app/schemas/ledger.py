@@ -6,6 +6,7 @@ from decimal import Decimal
 
 class WorkEntryCreate(BaseModel):
     employer_id: Optional[str] = None
+    worksite_id: Optional[str] = Field(None, min_length=1, max_length=36)
     work_date: date
     days_worked: Decimal = Field(..., ge=0, le=31, max_digits=15, decimal_places=2)
     hours_worked: Optional[Decimal] = Field(None, ge=0, le=24, max_digits=15, decimal_places=2)
@@ -40,6 +41,8 @@ class WorkEntryResponse(BaseModel):
     worker_id: str
     employer_id: Optional[str] = None
     employer_name: Optional[str] = None
+    worksite_id: Optional[str] = None
+    worksite_name: Optional[str] = None
     work_date: datetime
     days_worked: Decimal
     hours_worked: Optional[Decimal] = None
@@ -56,6 +59,14 @@ class WorkEntryResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class AttendanceDay(BaseModel):
+    date: date
+    recorded_entries: int
+    total_days_worked: Decimal
+    total_hours_worked: Decimal
+    total_earned: Decimal
 
 
 class PaymentCreate(BaseModel):
@@ -138,6 +149,8 @@ class TransactionItem(BaseModel):
     payment_type: Optional[str] = None
     employer_id: Optional[str] = None
     employer_name: Optional[str] = None
+    worksite_id: Optional[str] = None
+    worksite_name: Optional[str] = None
     description: Optional[str] = None
     source_statement_id: Optional[str] = None
     record_status: Literal["worker_reported", "worker_confirmed"] = "worker_reported"

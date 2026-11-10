@@ -12,6 +12,7 @@ A voice-first wage and work-record platform for India's daily-wage, construction
 - [API Reference](#api-reference)
 - [Database Schema](#database-schema)
 - [Voice Pipeline](#voice-pipeline)
+- [Local Evon v3.3 Transformers Runtime](#local-evon-v33-transformers-runtime)
 - [Wage Calculation Engine](#wage-calculation-engine)
 - [PDF Statement Generation](#pdf-statement-generation)
 - [Testing](#testing)
@@ -109,6 +110,7 @@ mazdoormitra/
 │   │   ├── auth/page.tsx            # Registration and login
 │   │   ├── dashboard/page.tsx       # Financial dashboard
 │   │   ├── voice/page.tsx           # Voice recording and confirmation
+│   │   ├── voice-studio/page.tsx    # Gnani Timbre Voice Studio
 │   │   ├── employers/page.tsx       # Employer management
 │   │   ├── history/page.tsx         # Transaction timeline
 │   │   └── statements/page.tsx      # Statement history and PDF download
@@ -194,11 +196,13 @@ All backend configuration is managed through `backend/.env`. See `backend/.env.e
 | `GNANI_PRISMA_API_URL` | For voice | `https://api.vachana.ai/stt/v3` | Prisma endpoint. |
 | `GNANI_EVON_API_KEY` | For voice | — | Gnani Evon API key with the required beta/service scope. |
 | `GNANI_EVON_API_URL` | For voice | `https://api.vachana.ai/v1/chat/completions` | Evon endpoint. |
+| `GNANI_EVON_BACKEND` | No | `api` | `api` for the configured service or `transformers` for a compatible Linux/CUDA host. |
+| `GNANI_EVON_MODEL_ID` | No | `gnani/gnani-evon-v3.3-30B-A3B` | Local model ID when the Transformers backend is selected. |
 | `GNANI_TIMBRE_API_KEY` | For voice | — | Gnani Timbre (TTS) API key. |
 | `GNANI_TIMBRE_API_URL` | For voice | `https://api.vachana.ai/api/v1/tts/inference` | Timbre endpoint. |
 | `CORS_ORIGINS` | No | `["http://localhost:3000"]` | Allowed CORS origins (JSON array or comma-separated). |
 
-The application runs without Gnani API keys — voice features return provider errors, but other functionality (auth, ledger, employers, statements) remains available. Gnani currently lists Evon v3.3 API access as a selected closed beta; an API key without that service access returns an upstream error. The app preserves the transcript and never substitutes fake extraction output.
+The application runs without Gnani API keys — voice features return provider errors, but other functionality (auth, ledger, employers, statements) remains available. An Evon API 403 is treated as an upstream failure; the app preserves the transcript and never substitutes fake extraction output.
 
 ## API Reference
 
@@ -232,6 +236,10 @@ Full voice session lifecycle — from audio upload through extraction, clarifica
 | `POST` | `/api/voice/sessions/{id}/confirm` | Confirm and persist extraction as a ledger record. |
 | `POST` | `/api/voice/sessions/{id}/reject` | Discard the session without persisting. |
 | `POST` | `/api/voice/sessions/{id}/speak` | Generate TTS audio receipt of the confirmed record. |
+| `GET` | `/api/voice/capabilities` | Provider-specific speech languages, models, voices, and access status. |
+| `POST` | `/api/voice/studio/generate` | Generate audio using a published Timbre model/voice combination. |
+| `GET` | `/api/voice/studio/history` | List the worker's TTS generation history. |
+| `DELETE` | `/api/voice/studio/history/{id}` | Delete one worker-owned TTS history item. |
 
 ### Ledger (`/api/ledger`)
 
@@ -252,6 +260,19 @@ All endpoints enforce per-worker data isolation.
 |---|---|---|
 | `GET` | `/api/employers` | List all employers for the authenticated worker. |
 | `POST` | `/api/employers` | Add a new employer (unique per worker). |
+| `GET` | `/api/employers/{id}/worksites` | List this worker's worksites for an employer. |
+| `POST` | `/api/employers/{id}/worksites` | Add a named, worker-owned worksite. |
+| `GET` | `/api/employers/{id}/agreements` | List reported, effective-dated wage agreements. |
+| `POST` | `/api/employers/{id}/agreements` | Add a daily/hourly wage agreement with optional site and dates. |
+
+### Kaam Diary (`/api/ledger`)
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/ledger/calendar?year=&month=` | Summarize dates with persisted work records. Empty dates do not imply absence. |
+| `PUT` | `/api/ledger/work/{id}` | Correct a work entry, recalculate wages, and append before/after audit details. |
+
+Corrections are rejected when the new wage would fall below amounts already allocated to the work or when it conflicts with an allocated employer payment.
 
 ### Statements (`/api/statements`)
 
@@ -260,10 +281,34 @@ All endpoints enforce per-worker data isolation.
 | `GET` | `/api/statements` | Paginated list of voice statements. |
 | `GET` | `/api/statements/{id}` | Full statement detail including extracted data and conversation history. |
 | `GET` | `/api/statements/{id}/pdf` | Download a bilingual PDF wage statement (confirmed statements only). |
+| `GET` | `/api/statements/export?start_date=&end_date=&employer_id=` | Download a bilingual PDF for a worker-scoped period/employer slice, with each record labelled reported or worker-confirmed. |
+
+### Evidence Vault (`/api/evidence`)
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/evidence` | Consent-gated private upload (PDF, JPEG, PNG, WebP, WAV, WebM; 12 MB limit). |
+| `GET` | `/api/evidence` | List worker-owned metadata only. |
+| `GET` | `/api/evidence/{id}/preview` | Authenticated inline preview for supported content types. |
+| `GET` | `/api/evidence/{id}/download` | Authenticated attachment download. |
+| `DELETE` | `/api/evidence/{id}` | Delete worker-owned file and metadata. |
+
+Uploads are signature-checked, stored under the ignored `backend/.private-evidence/` directory, and associated with at most one worker-owned record. This is private local storage for the current deployment; production should use a private object-storage bucket and managed backups.
+
+### Financial Insights and Assistance
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/insights?months=6` | Deterministic monthly and employer summaries computed from ledger rows. |
+| `GET/POST` | `/api/insights/savings-goals` | List or create worker-entered savings targets; targets do not track actual savings. |
+| `PATCH/DELETE` | `/api/insights/savings-goals/{id}` | Pause/reopen or delete a worker-owned goal. |
+| `GET` | `/api/assistance/resources` | Official e-Shram and SAMADHAN resource links. |
+| `GET` | `/api/assistance/faqs` | General record-keeping guidance. |
+| `GET` | `/api/assistance/payment-request` | Prepare a neutral, copy-only message from the recorded positive balance. No message is sent. |
 
 ## Database Schema
 
-Eight tables with UUID primary keys (`String(36)` for SQLite/PostgreSQL portability). All monetary columns use `Numeric(15, 2)` to prevent floating-point errors.
+Sixteen worker-scoped tables with UUID primary keys (`String(36)` for SQLite/PostgreSQL portability). All monetary columns use `Numeric(15, 2)` to prevent floating-point errors.
 
 ```
 workers
@@ -273,7 +318,15 @@ workers
 ├── payment_allocations   (worker/payment/work FKs; partial amount allocations)
 ├── voice_statements      (worker_id FK)
 ├── evidence_files        (worker/statement FKs)
-└── audit_events          (worker FK; append-only change history)
+├── audit_events          (worker FK; append-only change history)
+├── worksites             (worker/employer FKs)
+├── wage_agreements       (worker/employer/worksite FKs)
+├── wage_calculations     (immutable work-entry breakdown snapshots)
+├── worker_preferences    (worker-owned privacy/accessibility preferences)
+├── voice_generation_history (worker-owned Timbre history)
+├── reminder_preferences  (explicit consent and cadence)
+├── reminders             (worker-owned in-app reminders)
+└── savings_goals         (worker-entered goals)
 ```
 
 **Statement status lifecycle:**
@@ -283,7 +336,7 @@ workers
 
 ## Voice Pipeline
 
-The voice pipeline is a stateful, multi-turn conversation that converts spoken Hindi/Hinglish into structured ledger records:
+The voice pipeline is a stateful, multi-turn conversation that converts spoken Hindi, English, or Hinglish into structured ledger records. Prisma and Timbre capability metadata lists the ten documented Indian/English languages separately; complete multilingual Evon extraction depends on the selected backend and runtime/account access:
 
 1. **Record** — Worker speaks naturally ("Sharma ji ke yahan 3 din kaam kiya, 500 rupay daily").
 2. **Transcribe** — Gnani Prisma converts speech to text.
@@ -293,6 +346,23 @@ The voice pipeline is a stateful, multi-turn conversation that converts spoken H
 6. **Confirm** — Worker reviews the extracted summary and confirms or rejects.
 7. **Persist** — On confirmation, the system atomically creates the corresponding `WorkEntry` or `Payment` record, resolves or creates the `Employer`, and marks the statement as `CONFIRMED`.
 8. **Receipt** — Gnani Timbre generates a spoken audio receipt of the confirmed record. A provider failure leaves the saved record intact.
+
+## Local Evon v3.3 Transformers Runtime
+
+The Evon adapter can use Gnani's `gnani/gnani-evon-v3.3-30B-A3B` through Transformers. It loads lazily on the first extraction and uses `trust_remote_code=True` as shown by the [official model card](https://huggingface.co/gnani/gnani-evon-v3.3-30B-A3B).
+
+Use this only on a provisioned Linux NVIDIA CUDA inference host. The published checkpoint is BF16 with 30B total parameters; the model card lists H100 80 GB/H200/A100-class hardware and Transformers 5.3+. A 4 GB laptop GPU is not sufficient.
+
+```bash
+cd backend
+pip install -r requirements-evon-local.txt
+# Set in backend/.env:
+# GNANI_EVON_BACKEND=transformers
+# GNANI_EVON_MODEL_ID=gnani/gnani-evon-v3.3-30B-A3B
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+The current Windows/RTX 2050 (4 GB) workstation cannot run this model. The optional adapter is implemented but local inference has not been verified here. See the [model card runtime and hardware notes](https://huggingface.co/gnani/gnani-evon-v3.3-30B-A3B).
 
 ## Wage Calculation Engine
 
@@ -331,9 +401,11 @@ The test suite covers:
 - Conversation state machine (state transitions, follow-up generation, reply parsing)
 - PDF generation (layout, formatting, content)
 - Voice API workflow (confirmation gate, duplicate detection, provider failures, hourly overtime, spoken receipts)
-- Database migration preservation, audit ownership, partial allocations, and provider request contracts
+- Database migration preservation, audit ownership, partial allocations, worksite/agreement scoping, audited corrections, private evidence uploads, period PDF exports, computed insights, assistance drafts, and provider request contracts
 
 All tests mock external providers at the boundary and do not require API keys.
+
+Latest full workspace run: see `IMPLEMENTATION_STATUS.md` for the current result. This repository has no Playwright/Cypress setup or browser E2E test files. PostgreSQL migrations and local Evon inference were not live-verified.
 
 ### Provider Smoke Test
 
@@ -344,7 +416,7 @@ cd backend
 python smoke_gnani.py
 ```
 
-Exercises the Timbre → Prisma → Evon pipeline with synthetic Hindi speech. Does not persist any records. A current live run can pass Timbre and Prisma but fail Evon with HTTP 403 when the API key lacks the beta service scope; see [Gnani's Evon access page](https://www.gnani.ai/ja-jp/evon-waitlist).
+Exercises the Timbre → Prisma → Evon API pipeline with synthetic Hindi speech. Does not persist records. A 403 from the API is an access failure, not a success; the optional local Transformers route is documented above.
 
 ### Frontend
 

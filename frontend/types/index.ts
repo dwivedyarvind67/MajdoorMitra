@@ -30,6 +30,8 @@ export interface WorkEntry {
   worker_id: string;
   employer_id?: string;
   employer_name?: string;
+  worksite_id?: string;
+  worksite_name?: string;
   work_date: string;
   days_worked: string;
   hours_worked?: string;
@@ -44,6 +46,121 @@ export interface WorkEntry {
   description?: string;
   source_statement_id?: string;
   created_at: string;
+}
+
+export interface Worksite {
+  id: string;
+  worker_id: string;
+  employer_id?: string | null;
+  name: string;
+  address?: string | null;
+  created_at: string;
+}
+
+export interface WageAgreement {
+  id: string;
+  worker_id: string;
+  employer_id: string;
+  worksite_id?: string | null;
+  wage_basis: 'daily' | 'hourly';
+  daily_rate?: string | null;
+  hourly_rate?: string | null;
+  overtime_multiplier: string;
+  effective_from: string;
+  effective_to?: string | null;
+  terms?: string | null;
+  created_at: string;
+}
+
+export interface AttendanceDay {
+  date: string;
+  recorded_entries: number;
+  total_days_worked: string;
+  total_hours_worked: string;
+  total_earned: string;
+}
+
+export interface EvidenceFileRecord {
+  id: string;
+  worker_id: string;
+  file_name?: string | null;
+  document_type?: string | null;
+  content_type?: string | null;
+  size_bytes?: number | null;
+  checksum_sha256?: string | null;
+  consent_given: boolean;
+  statement_id?: string | null;
+  work_entry_id?: string | null;
+  payment_id?: string | null;
+  created_at: string;
+}
+
+export interface MonthlyInsight {
+  month: string;
+  earnings: string;
+  payments: string;
+  pending: string;
+  recorded_workdays: number;
+  worked_days: string;
+}
+
+export interface EmployerInsight {
+  employer_id?: string | null;
+  employer_name: string;
+  earnings: string;
+  payments: string;
+  pending: string;
+}
+
+export interface FinancialInsights {
+  period_start: string;
+  period_end: string;
+  total_earnings: string;
+  total_payments: string;
+  total_pending: string;
+  average_daily_earnings: string;
+  recorded_workdays: number;
+  worked_days: string;
+  monthly: MonthlyInsight[];
+  employers: EmployerInsight[];
+}
+
+export interface SavingsGoal {
+  id: string;
+  worker_id: string;
+  name: string;
+  target_amount: string;
+  target_date?: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AssistanceResource {
+  id: string;
+  title: string;
+  description: string;
+  url: string;
+  source: string;
+  phone?: string | null;
+  availability?: string | null;
+}
+
+export interface AssistanceFaq {
+  id: string;
+  question_hi: string;
+  answer_hi: string;
+  question_en: string;
+  answer_en: string;
+}
+
+export interface PaymentRequestDraft {
+  employer_id?: string | null;
+  employer_name: string;
+  amount_in_recorded_balance: string;
+  language: 'hi' | 'en';
+  message: string;
+  delivery: 'copy_only';
 }
 
 export interface Payment {

@@ -139,7 +139,7 @@ export default function VoiceRecorder({ onRecordingComplete, isProcessing, isRea
   };
 
   return (
-    <section className="mx-auto flex w-full max-w-xl flex-col items-center rounded-[2rem] border border-[#e7e5dc] bg-[#fffefa] p-5 text-center shadow-[0_18px_45px_rgba(40,54,43,0.07)] sm:p-8">
+    <section className="mx-auto flex w-full max-w-xl flex-col items-center rounded-[2rem] border border-[#e4e4e7] bg-[#ffffff] p-5 text-center shadow-[0_18px_45px_rgba(24,24,27,0.07)] sm:p-8">
       {error && (
         <div role="alert" className="mb-4 flex w-full items-start gap-2 rounded-xl bg-red-50 p-3 text-left text-sm text-red-800">
           <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
@@ -148,7 +148,7 @@ export default function VoiceRecorder({ onRecordingComplete, isProcessing, isRea
       )}
 
       <div className="relative my-4">
-        {!isRecording && !isProcessing && !isPreparing && <div className="absolute -inset-3 rounded-full border border-[#dce8d9]" aria-hidden="true" />}
+        {!isRecording && !isProcessing && !isPreparing && <div className="absolute -inset-3 rounded-full border border-[#e4e4e7]" aria-hidden="true" />}
         {isRecording && <div className="absolute -inset-3 animate-pulse rounded-full bg-red-100" aria-hidden="true" />}
         <button
           type="button"
@@ -156,8 +156,8 @@ export default function VoiceRecorder({ onRecordingComplete, isProcessing, isRea
           disabled={isProcessing || isPreparing || !isReady}
           aria-label={isRecording ? 'रिकॉर्डिंग रोकें' : 'आवाज़ रिकॉर्ड करें'}
           aria-pressed={isRecording}
-          className={`relative z-10 flex h-36 w-36 flex-col items-center justify-center rounded-full shadow-[0_12px_35px_rgba(23,59,47,0.24)] transition-transform focus:outline-none focus:ring-4 focus:ring-[#a6c5a7] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 sm:h-40 sm:w-40 ${
-            isRecording ? 'bg-[#a9362b] text-white' : 'bg-[#173b2f] text-white hover:scale-[1.04] active:scale-95'
+          className={`relative z-10 flex h-36 w-36 flex-col items-center justify-center rounded-full shadow-[0_12px_35px_rgba(24,24,27,0.24)] transition-transform focus:outline-none focus:ring-4 focus:ring-[#a1a1aa] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 sm:h-40 sm:w-40 ${
+            isRecording ? 'bg-[#a9362b] text-white' : 'bg-[#27272a] text-white hover:scale-[1.04] active:scale-95'
           }`}
         >
           {isProcessing || isPreparing ? <Loader2 className="h-12 w-12 animate-spin" aria-hidden="true" /> : isRecording ? <Square className="h-10 w-10 fill-current" aria-hidden="true" /> : <Mic className="h-14 w-14" aria-hidden="true" />}
@@ -175,9 +175,9 @@ export default function VoiceRecorder({ onRecordingComplete, isProcessing, isRea
             <p className="text-sm text-slate-700">बोलिए… अधिकतम 30 सेकंड</p>
           </div>
         ) : isPreparing ? (
-          <p className="text-base font-semibold text-[#285c3d]">आवाज़ साफ़ की जा रही है…</p>
+          <p className="text-base font-semibold text-[#52525b]">आवाज़ साफ़ की जा रही है…</p>
         ) : isProcessing ? (
-          <p className="text-base font-semibold text-[#285c3d]">आपकी बात समझी जा रही है…</p>
+          <p className="text-base font-semibold text-[#52525b]">आपकी बात समझी जा रही है…</p>
         ) : !isReady ? (
           <p className="text-base font-semibold text-slate-600">सत्र तैयार हो रहा है…</p>
         ) : (

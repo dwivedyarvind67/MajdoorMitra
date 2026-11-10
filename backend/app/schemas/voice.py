@@ -16,7 +16,7 @@ class StatementStatus(str, Enum):
 
 
 class VoiceSessionCreate(BaseModel):
-    language: str = Field(default="hi", pattern=r'^(hi|en)$')
+    language: str = Field(default="hi", pattern=r'^(hi|en|hinglish)$')
 
 
 class VoiceSessionResponse(BaseModel):
@@ -116,3 +116,36 @@ class SpeakResponse(BaseModel):
     text: str
     audio_base64: Optional[str] = None
     audio_content_type: Optional[str] = None
+
+
+class VoiceStudioRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=4000)
+    model_id: Literal["timbre-v2.5", "timbre-v3.0"] = "timbre-v3.0"
+    voice_id: str = Field(..., min_length=2, max_length=40)
+    language: str = Field(..., pattern=r"^(auto|hi-en|bn-IN|en-IN|gu-IN|hi-IN|kn-IN|ml-IN|mr-IN|pa-IN|ta-IN|te-IN)$")
+    speed: Decimal = Field(default=Decimal("1.0"), ge=Decimal("0.85"), le=Decimal("1.15"), max_digits=3, decimal_places=2)
+    source_statement_id: Optional[str] = None
+
+
+class VoiceStudioResponse(BaseModel):
+    id: str
+    text: str
+    language: str
+    model_id: str
+    voice_id: str
+    status: Literal["success", "failed"]
+    latency_ms: int
+    audio_base64: Optional[str] = None
+    audio_content_type: Optional[str] = None
+    created_at: datetime
+
+
+class VoiceGenerationHistoryItem(BaseModel):
+    id: str
+    text_input: str
+    language: str
+    model_id: str
+    voice_id: str
+    status: str
+    latency_ms: Optional[int] = None
+    created_at: datetime

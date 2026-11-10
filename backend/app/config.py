@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     # Gnani Evon (LLM / NLP extraction)
     GNANI_EVON_API_KEY: str = ""
     GNANI_EVON_API_URL: str = "https://api.vachana.ai/v1/chat/completions"
+    GNANI_EVON_BACKEND: str = "api"  # api | transformers
+    GNANI_EVON_MODEL_ID: str = "gnani/gnani-evon-v3.3-30B-A3B"
 
     # Gnani Timbre (Text-to-Speech)
     GNANI_TIMBRE_API_KEY: str = ""

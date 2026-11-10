@@ -11,10 +11,10 @@ from sqlalchemy import select, and_, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
-from app.models.models import AuditEvent, WorkEntry, Payment, PaymentAllocation, Employer, VoiceStatement, StatementStatus, PaymentType
+from app.models.models import AuditEvent, WageCalculation, WorkEntry, Payment, PaymentAllocation, Employer, Worksite, VoiceStatement, StatementStatus, PaymentType
 from app.schemas.ledger import WorkEntryCreate, PaymentCreate, PaymentAllocationCreate, LedgerSummary, EmployerSummary, TransactionItem
 from app.services.audit_service import AuditService
-from app.services.wage_calculator import WageCalculator, quantize_money
+from app.services.wage_calculator import FinancialService, WageCalculator, quantize_money
 
 
 class LedgerService:
@@ -31,6 +31,12 @@ class LedgerService:
         days_worked: Decimal,
         employer_id: Optional[str] = None,
         hours_worked: Optional[Decimal] = None,
+        worksite_id: Optional[str] = None,
+        wage_basis: str = "daily",
+        hourly_rate: Optional[Decimal] = None,
+        overtime_hours: Decimal = Decimal("0"),
+        overtime_multiplier: Decimal = Decimal("1.5"),
+        exclude_entry_id: Optional[str] = None,
     ) -> bool:
         """Check for an exact same-worker, same-employer work entry."""
         stmt = select(WorkEntry).where(
@@ -41,8 +47,15 @@ class LedgerService:
                 WorkEntry.days_worked == days_worked,
                 WorkEntry.employer_id.is_(None) if employer_id is None else WorkEntry.employer_id == employer_id,
                 WorkEntry.hours_worked.is_(None) if hours_worked is None else WorkEntry.hours_worked == hours_worked,
+                WorkEntry.worksite_id.is_(None) if worksite_id is None else WorkEntry.worksite_id == worksite_id,
+                WorkEntry.wage_basis == wage_basis,
+                WorkEntry.hourly_rate.is_(None) if hourly_rate is None else WorkEntry.hourly_rate == hourly_rate,
+                WorkEntry.overtime_hours == overtime_hours,
+                WorkEntry.overtime_multiplier == overtime_multiplier,
             )
         )
+        if exclude_entry_id:
+            stmt = stmt.where(WorkEntry.id != exclude_entry_id)
         res = await session.execute(stmt)
         return res.scalars().first() is not None
 
@@ -81,6 +94,7 @@ class LedgerService:
         """Create a new work entry with deterministic calculation."""
         work_dt = datetime.combine(data.work_date, datetime.min.time(), tzinfo=timezone.utc)
         await cls._validate_employer(session, worker_id, data.employer_id)
+        worksite = await cls._validate_worksite(session, worker_id, data.worksite_id, data.employer_id)
         if source_statement_id:
             existing_source = await session.execute(
                 select(WorkEntry.id).where(
@@ -92,15 +106,20 @@ class LedgerService:
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This voice statement is already recorded.")
 
         if await cls.check_duplicate_work_entry(
-            session, worker_id, work_dt, data.daily_wage, data.days_worked,
+            session, worker_id, work_dt, data.daily_wage or Decimal("0"), data.days_worked,
             employer_id=data.employer_id, hours_worked=data.hours_worked,
+            worksite_id=data.worksite_id,
+            wage_basis=data.wage_basis,
+            hourly_rate=data.hourly_rate,
+            overtime_hours=data.overtime_hours,
+            overtime_multiplier=data.overtime_multiplier,
         ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="A work entry with identical date, wage, and days already exists.",
             )
 
-        total_earned = WageCalculator.calculate_work_entry_total(
+        breakdown = FinancialService.calculate_work_breakdown(
             days_worked=data.days_worked,
             daily_wage=data.daily_wage or Decimal("0"),
             hours_worked=data.hours_worked,
@@ -109,6 +128,7 @@ class LedgerService:
             overtime_hours=data.overtime_hours,
             overtime_multiplier=data.overtime_multiplier,
         )
+        total_earned = breakdown["total_earned"]
         if total_earned > cls.MAX_MONEY:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -118,6 +138,8 @@ class LedgerService:
         entry = WorkEntry(
             worker_id=worker_id,
             employer_id=data.employer_id,
+            worksite_id=data.worksite_id,
+            worksite=worksite,
             work_date=work_dt,
             days_worked=data.days_worked,
             hours_worked=data.hours_worked,
@@ -132,6 +154,14 @@ class LedgerService:
         )
         session.add(entry)
         await session.flush()
+        session.add(WageCalculation(
+            worker_id=worker_id,
+            work_entry_id=entry.id,
+            base_amount=breakdown["base_earned"],
+            overtime_amount=breakdown["overtime_earned"],
+            total_amount=breakdown["total_earned"],
+            formula_version="decimal-v1",
+        ))
         AuditService.record(
             session,
             worker_id,
@@ -142,6 +172,7 @@ class LedgerService:
             details={
                 "work_date": data.work_date.isoformat(),
                 "employer_id": data.employer_id,
+                "worksite_id": data.worksite_id,
                 "days_worked": str(data.days_worked),
                 "hours_worked": str(data.hours_worked) if data.hours_worked is not None else None,
                 "daily_wage": str(data.daily_wage) if data.daily_wage is not None else None,
@@ -150,7 +181,150 @@ class LedgerService:
                 "overtime_hours": str(data.overtime_hours),
                 "overtime_multiplier": str(data.overtime_multiplier),
                 "total_earned": str(total_earned),
+                "base_earned": str(breakdown["base_earned"]),
+                "overtime_earned": str(breakdown["overtime_earned"]),
             },
+        )
+        await session.flush()
+        await session.refresh(entry)
+        return entry
+
+    @classmethod
+    async def update_work_entry(
+        cls,
+        session: AsyncSession,
+        worker_id: str,
+        entry_id: str,
+        data: WorkEntryCreate,
+    ) -> WorkEntry:
+        """Correct a work entry, recalculate its wage, and preserve before/after audit data."""
+        entry = (await session.execute(
+            select(WorkEntry).where(
+                WorkEntry.id == entry_id,
+                WorkEntry.worker_id == worker_id,
+            ).with_for_update()
+        )).scalar_one_or_none()
+        if entry is None:
+            raise HTTPException(status_code=404, detail="Work entry not found.")
+
+        await cls._validate_employer(session, worker_id, data.employer_id)
+        worksite = await cls._validate_worksite(session, worker_id, data.worksite_id, data.employer_id)
+        work_dt = datetime.combine(data.work_date, datetime.min.time(), tzinfo=timezone.utc)
+        if await cls.check_duplicate_work_entry(
+            session, worker_id, work_dt, data.daily_wage or Decimal("0"), data.days_worked,
+            employer_id=data.employer_id,
+            hours_worked=data.hours_worked,
+            worksite_id=data.worksite_id,
+            wage_basis=data.wage_basis,
+            hourly_rate=data.hourly_rate,
+            overtime_hours=data.overtime_hours,
+            overtime_multiplier=data.overtime_multiplier,
+            exclude_entry_id=entry.id,
+        ):
+            raise HTTPException(status_code=409, detail="Another identical work entry already exists.")
+
+        breakdown = FinancialService.calculate_work_breakdown(
+            days_worked=data.days_worked,
+            daily_wage=data.daily_wage or Decimal("0"),
+            hours_worked=data.hours_worked,
+            wage_basis=data.wage_basis,
+            hourly_rate=data.hourly_rate,
+            overtime_hours=data.overtime_hours,
+            overtime_multiplier=data.overtime_multiplier,
+        )
+        total_earned = breakdown["total_earned"]
+        if total_earned > cls.MAX_MONEY:
+            raise HTTPException(status_code=422, detail="The calculated total is above the supported range.")
+
+        allocated_total = await session.scalar(
+            select(func.coalesce(func.sum(PaymentAllocation.amount), 0)).where(
+                PaymentAllocation.worker_id == worker_id,
+                PaymentAllocation.work_entry_id == entry.id,
+            )
+        )
+        if Decimal(str(allocated_total or 0)) > total_earned:
+            raise HTTPException(
+                status_code=422,
+                detail="The corrected wage is below payments already allocated to this work. Review those allocations first.",
+            )
+        allocated_payment_employers = (
+            await session.execute(
+                select(Payment.employer_id)
+                .join(PaymentAllocation, PaymentAllocation.payment_id == Payment.id)
+                .where(
+                    PaymentAllocation.worker_id == worker_id,
+                    PaymentAllocation.work_entry_id == entry.id,
+                    Payment.employer_id.is_not(None),
+                )
+                .distinct()
+            )
+        ).scalars().all()
+        if any(payment_employer_id != data.employer_id for payment_employer_id in allocated_payment_employers):
+            raise HTTPException(
+                status_code=422,
+                detail="The corrected employer conflicts with an already allocated employer payment.",
+            )
+
+        def as_text(value):
+            return str(value) if value is not None else None
+
+        before = {
+            "employer_id": entry.employer_id,
+            "worksite_id": entry.worksite_id,
+            "work_date": entry.work_date.date().isoformat(),
+            "days_worked": as_text(entry.days_worked),
+            "hours_worked": as_text(entry.hours_worked),
+            "wage_basis": entry.wage_basis,
+            "daily_wage": as_text(entry.daily_wage),
+            "hourly_rate": as_text(entry.hourly_rate),
+            "overtime_hours": as_text(entry.overtime_hours),
+            "overtime_multiplier": as_text(entry.overtime_multiplier),
+            "total_earned": as_text(entry.total_earned),
+            "description": entry.description,
+        }
+
+        entry.employer_id = data.employer_id
+        entry.worksite_id = data.worksite_id
+        entry.worksite = worksite
+        entry.work_date = work_dt
+        entry.days_worked = data.days_worked
+        entry.hours_worked = data.hours_worked
+        entry.wage_basis = data.wage_basis
+        entry.daily_wage = data.daily_wage or Decimal("0")
+        entry.hourly_rate = data.hourly_rate
+        entry.overtime_hours = data.overtime_hours
+        entry.overtime_multiplier = data.overtime_multiplier
+        entry.total_earned = total_earned
+        entry.description = data.description
+
+        snapshot = (await session.execute(
+            select(WageCalculation).where(WageCalculation.work_entry_id == entry.id)
+        )).scalar_one_or_none()
+        if snapshot:
+            snapshot.base_amount = breakdown["base_earned"]
+            snapshot.overtime_amount = breakdown["overtime_earned"]
+            snapshot.total_amount = total_earned
+
+        after = {
+            "employer_id": data.employer_id,
+            "worksite_id": data.worksite_id,
+            "work_date": data.work_date.isoformat(),
+            "days_worked": as_text(data.days_worked),
+            "hours_worked": as_text(data.hours_worked),
+            "wage_basis": data.wage_basis,
+            "daily_wage": as_text(data.daily_wage or Decimal("0")),
+            "hourly_rate": as_text(data.hourly_rate),
+            "overtime_hours": as_text(data.overtime_hours),
+            "overtime_multiplier": as_text(data.overtime_multiplier),
+            "base_amount": as_text(breakdown["base_earned"]),
+            "overtime_amount": as_text(breakdown["overtime_earned"]),
+            "total_earned": as_text(total_earned),
+            "description": data.description,
+        }
+        AuditService.record(
+            session, worker_id, "ledger.work_corrected", "work_entry", entry.id,
+            source_statement_id=entry.source_statement_id,
+            details={"before": before, "after": after},
         )
         await session.flush()
         await session.refresh(entry)
@@ -315,6 +489,24 @@ class LedgerService:
         if result.scalar_one_or_none() is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employer not found.")
 
+    @staticmethod
+    async def _validate_worksite(
+        session: AsyncSession,
+        worker_id: str,
+        worksite_id: Optional[str],
+        employer_id: Optional[str],
+    ) -> Optional[Worksite]:
+        if worksite_id is None:
+            return None
+        worksite = (await session.execute(
+            select(Worksite).where(Worksite.id == worksite_id, Worksite.worker_id == worker_id)
+        )).scalar_one_or_none()
+        if worksite is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Worksite not found.")
+        if worksite.employer_id is not None and worksite.employer_id != employer_id:
+            raise HTTPException(status_code=422, detail="Worksite belongs to a different employer.")
+        return worksite
+
     @classmethod
     async def get_summary(
         cls,
@@ -470,12 +662,28 @@ class LedgerService:
             )
             corrected_statement_ids = {row[0] for row in correction_rows.all()}
 
-        def provenance(source_statement_id: Optional[str]) -> dict:
+        work_entry_ids = {entry.id for entry in w_list}
+        corrected_work_entry_ids = set()
+        if work_entry_ids:
+            corrected_rows = await session.execute(
+                select(AuditEvent.entity_id).where(
+                    AuditEvent.worker_id == worker_id,
+                    AuditEvent.entity_id.in_(work_entry_ids),
+                    AuditEvent.entity_type == "work_entry",
+                    AuditEvent.event_type == "ledger.work_corrected",
+                )
+            )
+            corrected_work_entry_ids = {row[0] for row in corrected_rows.all()}
+
+        def provenance(source_statement_id: Optional[str], record_id: Optional[str] = None) -> dict:
             statement = statement_map.get(source_statement_id) if source_statement_id else None
             confirmed = bool(statement and statement.status == StatementStatus.CONFIRMED)
             return {
                 "record_status": "worker_confirmed" if confirmed else "worker_reported",
-                "was_corrected": bool(source_statement_id and source_statement_id in corrected_statement_ids),
+                "was_corrected": bool(
+                    (source_statement_id and source_statement_id in corrected_statement_ids)
+                    or (record_id and record_id in corrected_work_entry_ids)
+                ),
                 "confirmed_at": statement.confirmed_at if confirmed else None,
             }
 
@@ -496,9 +704,11 @@ class LedgerService:
                     overtime_multiplier=w.overtime_multiplier,
                     employer_id=w.employer_id,
                     employer_name=emp_map.get(w.employer_id) if w.employer_id else None,
+                    worksite_id=w.worksite_id,
+                    worksite_name=w.worksite.name if w.worksite else None,
                     description=w.description or f"{w.days_worked} days @ Rs {w.daily_wage}",
                     source_statement_id=w.source_statement_id,
-                    **provenance(w.source_statement_id),
+                    **provenance(w.source_statement_id, w.id),
                 )
             )
 

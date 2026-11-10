@@ -12,8 +12,8 @@ interface ConfirmationCardProps {
   isConfirming?: boolean;
 }
 
-const fieldClass = 'min-h-12 w-full rounded-xl border border-[#d9ded5] bg-white px-3 text-base font-semibold text-slate-950 focus:outline-none focus:ring-2 focus:ring-[#28734e]';
-const rowClass = 'flex min-h-12 items-center justify-between gap-3 border-b border-[#eeeee8] py-2 text-sm';
+const fieldClass = 'min-h-12 w-full rounded-xl border border-[#e4e4e7] bg-white px-3 text-base font-semibold text-slate-950 focus:outline-none focus:ring-2 focus:ring-[#52525b]';
+const rowClass = 'flex min-h-12 items-center justify-between gap-3 border-b border-[#e4e4e7] py-2 text-sm';
 
 export default function ConfirmationCard({
   data,
@@ -32,11 +32,11 @@ export default function ConfirmationCard({
   const isHourly = formData.wage_basis === 'hourly';
 
   return (
-    <section className="my-4 rounded-[1.75rem] border border-[#d9ded5] bg-[#fffefa] p-5 text-left shadow-[0_12px_34px_rgba(40,54,43,0.06)] sm:p-6" aria-labelledby="confirm-heading">
-      <div className="flex items-start justify-between gap-3 border-b border-[#e9e8df] pb-4">
+    <section className="my-4 rounded-[1.75rem] border border-[#e4e4e7] bg-[#ffffff] p-5 text-left shadow-[0_12px_34px_rgba(24,24,27,0.06)] sm:p-6" aria-labelledby="confirm-heading">
+      <div className="flex items-start justify-between gap-3 border-b border-[#f4f4f5] pb-4">
         <div>
-          <span className="text-sm font-extrabold text-[#9a6a2b]">आपकी बताई जानकारी · जाँचें</span>
-          <h2 id="confirm-heading" className="mt-1 text-xl font-black text-[#173b2f]">
+          <span className="text-sm font-extrabold text-[#71717a]">आपकी बताई जानकारी · जाँचें</span>
+          <h2 id="confirm-heading" className="mt-1 text-xl font-black text-[#27272a]">
             {isPayment ? 'मिला हुआ भुगतान' : 'काम का हिसाब'}
           </h2>
         </div>
@@ -44,7 +44,7 @@ export default function ConfirmationCard({
           type="button"
           onClick={() => setIsEditing((value) => !value)}
           aria-expanded={isEditing}
-          className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-xl bg-[#f0f2ec] px-3 text-sm font-extrabold text-[#254d3a] hover:bg-[#e5eee2]"
+          className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-xl bg-[#f4f4f5] px-3 text-sm font-extrabold text-[#3f3f46] hover:bg-[#e4e4e7]"
         >
           <Edit2 className="h-4 w-4" aria-hidden="true" />
           {isEditing ? 'देखें' : 'बदलें'}
@@ -123,15 +123,15 @@ export default function ConfirmationCard({
                 </label>
               </>
             )}
-            <div className="mt-3 rounded-2xl border border-[#dce8d9] bg-[#f1f6ee] p-4" aria-live="polite">
-              <div className="flex items-center gap-2 text-sm font-extrabold text-[#285c3d]">
+            <div className="mt-3 rounded-2xl border border-[#e4e4e7] bg-[#f4f4f5] p-4" aria-live="polite">
+              <div className="flex items-center gap-2 text-sm font-extrabold text-[#52525b]">
                 <Calculator className="h-4 w-4" aria-hidden="true" />
                 हिसाब का साफ़ बँटवारा
               </div>
               <dl className="mt-2 space-y-1.5 text-sm">
                 <div className="flex justify-between gap-3"><dt className="text-slate-600">सामान्य कमाई</dt><dd className="font-bold text-slate-900">₹{formData.base_earned ?? '—'}</dd></div>
                 {Number(formData.overtime_hours ?? 0) > 0 && <div className="flex justify-between gap-3"><dt className="text-slate-600">ओवरटाइम कमाई</dt><dd className="font-bold text-slate-900">₹{formData.overtime_earned ?? '—'}</dd></div>}
-                <div className="flex justify-between gap-3 border-t border-[#d9e4d4] pt-2 text-base"><dt className="font-black text-[#173b2f]">कुल कमाई</dt><dd className="font-black text-[#173b2f]">₹{formData.calculated_total ?? '—'}</dd></div>
+                <div className="flex justify-between gap-3 border-t border-[#e4e4e7] pt-2 text-base"><dt className="font-black text-[#27272a]">कुल कमाई</dt><dd className="font-black text-[#27272a]">₹{formData.calculated_total ?? '—'}</dd></div>
               </dl>
               {isEditing && <p className="mt-2 text-xs leading-5 text-slate-600">बदले हुए अंकों का नया हिसाब देखने के लिए नीचे “बदलाव जाँचें” दबाएँ।</p>}
             </div>
@@ -144,7 +144,7 @@ export default function ConfirmationCard({
               <span className="font-medium text-slate-700">मिली रकम</span>
               {isEditing ? (
                 <input aria-label="मिली रकम" className={`${fieldClass} max-w-52 text-right`} type="number" min="0.01" step="0.01" value={formData.amount_received ?? ''} onChange={(event) => update('amount_received', event.target.value)} />
-              ) : <span className="text-xl font-black text-[#285c3d]">₹{formData.amount_received ?? '—'}</span>}
+              ) : <span className="text-xl font-black text-[#52525b]">₹{formData.amount_received ?? '—'}</span>}
             </label>
             <label className={rowClass}>
               <span className="font-medium text-slate-700">भुगतान का तरीका</span>
@@ -173,28 +173,28 @@ export default function ConfirmationCard({
         {isEditing && (
           <label className="block py-2 text-sm font-medium text-slate-700">
             काम का विवरण (वैकल्पिक)
-            <textarea aria-label="काम का विवरण" className="mt-2 min-h-20 w-full rounded-xl border border-[#d9ded5] p-3 text-base focus:outline-none focus:ring-2 focus:ring-[#28734e]" maxLength={500} value={formData.description ?? ''} onChange={(event) => update('description', event.target.value)} />
+            <textarea aria-label="काम का विवरण" className="mt-2 min-h-20 w-full rounded-xl border border-[#e4e4e7] p-3 text-base focus:outline-none focus:ring-2 focus:ring-[#52525b]" maxLength={500} value={formData.description ?? ''} onChange={(event) => update('description', event.target.value)} />
           </label>
         )}
       </div>
 
-      <p className="border-t border-[#e9e8df] pt-3 text-sm leading-6 text-slate-600">
+      <p className="border-t border-[#f4f4f5] pt-3 text-sm leading-6 text-slate-600">
         यह जानकारी आपकी आवाज़ से निकली है। इसमें बदलाव आप कर सकते हैं; आपके साफ़ कहने के बाद ही यह हिसाब में जुड़ेगी।
       </p>
 
       <div className="flex gap-3 pt-4">
         {isEditing ? (
-          <button type="button" onClick={() => onReviewChanges(formData)} disabled={isConfirming} className="flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-[#173b2f] px-4 text-base font-bold text-white shadow hover:bg-[#245541] disabled:opacity-60">
+          <button type="button" onClick={() => onReviewChanges(formData)} disabled={isConfirming} className="flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-[#27272a] px-4 text-base font-bold text-white shadow hover:bg-[#3f3f46] disabled:opacity-60">
             <Calculator className="h-5 w-5" aria-hidden="true" />
             {isConfirming ? 'हिसाब जाँचा जा रहा है…' : 'बदलाव जाँचें'}
           </button>
         ) : (
-          <button type="button" onClick={onConfirm} disabled={isConfirming} className="flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-[#28734e] px-4 text-base font-bold text-white shadow hover:bg-[#1f603f] disabled:opacity-60">
+          <button type="button" onClick={onConfirm} disabled={isConfirming} className="flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-[#52525b] px-4 text-base font-bold text-white shadow hover:bg-[#3f3f46] disabled:opacity-60">
             <Check className="h-5 w-5" aria-hidden="true" />
             {isConfirming ? 'सेव हो रहा है…' : 'पुष्टि करें और सेव करें'}
           </button>
         )}
-        <button type="button" onClick={onReject} disabled={isConfirming} aria-label="ड्राफ़्ट रद्द करें" className="flex min-h-12 min-w-12 items-center justify-center rounded-xl border border-[#d9ded5] bg-white text-slate-700 hover:bg-red-50 hover:text-red-700 disabled:opacity-60">
+        <button type="button" onClick={onReject} disabled={isConfirming} aria-label="ड्राफ़्ट रद्द करें" className="flex min-h-12 min-w-12 items-center justify-center rounded-xl border border-[#e4e4e7] bg-white text-slate-700 hover:bg-red-50 hover:text-red-700 disabled:opacity-60">
           <X className="h-5 w-5" aria-hidden="true" />
         </button>
       </div>

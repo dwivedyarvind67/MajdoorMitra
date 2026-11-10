@@ -288,6 +288,19 @@ class TestFullSummary:
         assert total == Decimal("0.30")
         # Float would give 0.30000000000000004
 
+    @pytest.mark.parametrize(
+        ("days", "rate", "received", "expected_pending"),
+        [
+            (6, 700, 3000, "1200.00"),
+            (5, 500, 2500, "0.00"),
+            (7, 800, 2000, "3600.00"),
+        ],
+    )
+    def test_required_prompt_financial_scenarios(self, days, rate, received, expected_pending):
+        work = [{"days_worked": Decimal(str(days)), "daily_wage": Decimal(str(rate))}]
+        payments = [{"amount": Decimal(str(received)), "payment_type": "cash"}]
+        assert WageCalculator.calculate_summary(work, payments)["pending"] == Decimal(expected_pending)
+
 
 class TestQuantizeMoney:
     """Tests for the quantize_money helper."""

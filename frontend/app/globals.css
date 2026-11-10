@@ -2,12 +2,12 @@
 
 :root {
   color-scheme: light;
-  --ink: #17251f;
-  --forest: #173b2f;
-  --leaf: #28734e;
-  --saffron: #d88a27;
-  --paper: #f5f3ed;
-  --line: #e7e5dc;
+  --ink: #18181b;
+  --forest: #27272a;
+  --leaf: #3f3f46;
+  --saffron: #71717a;
+  --paper: #f4f4f5;
+  --line: #e4e4e7;
   --background: var(--paper);
   --foreground: var(--ink);
 }
@@ -23,11 +23,8 @@ html { scroll-behavior: smooth; }
 
 body {
   color: var(--ink);
-  background:
-    radial-gradient(ellipse at 7% 0%, rgba(226, 185, 121, 0.13), transparent 29rem),
-    radial-gradient(ellipse at 100% 12%, rgba(92, 143, 111, 0.10), transparent 34rem),
-    var(--paper);
-  font-family: Arial, "Noto Sans Devanagari", "Nirmala UI", sans-serif;
+  background: var(--paper);
+  font-family: Inter, "Noto Sans Devanagari", "Nirmala UI", Arial, sans-serif;
   line-height: 1.55;
   font-feature-settings: "kern";
 }
@@ -36,11 +33,11 @@ button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 button, a { touch-action: manipulation; }
 
 :focus-visible {
-  outline: 3px solid #b5691d;
+  outline: 3px solid #52525b;
   outline-offset: 3px;
 }
 
-::selection { background: #dce9da; color: #173b2f; }
+::selection { background: #e4e4e7; color: #18181b; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

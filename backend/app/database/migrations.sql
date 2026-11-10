@@ -138,3 +138,130 @@ CREATE INDEX IF NOT EXISTS ix_audit_events_worker_id ON audit_events (worker_id)
 CREATE INDEX IF NOT EXISTS ix_audit_events_source_statement_id ON audit_events (source_statement_id);
 CREATE INDEX IF NOT EXISTS ix_audit_events_worker_created ON audit_events (worker_id, created_at);
 CREATE INDEX IF NOT EXISTS ix_audit_events_entity ON audit_events (entity_type, entity_id);
+
+-- Additive evidence-vault metadata. Existing records remain unconsented by default.
+ALTER TABLE evidence_files ADD COLUMN IF NOT EXISTS content_type VARCHAR(127);
+ALTER TABLE evidence_files ADD COLUMN IF NOT EXISTS file_name VARCHAR(255);
+ALTER TABLE evidence_files ADD COLUMN IF NOT EXISTS size_bytes BIGINT;
+ALTER TABLE evidence_files ADD COLUMN IF NOT EXISTS checksum_sha256 VARCHAR(64);
+ALTER TABLE evidence_files ADD COLUMN IF NOT EXISTS consent_given BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE evidence_files ADD COLUMN IF NOT EXISTS work_entry_id VARCHAR(36) REFERENCES work_entries(id) ON DELETE SET NULL;
+ALTER TABLE evidence_files ADD COLUMN IF NOT EXISTS payment_id VARCHAR(36) REFERENCES payments(id) ON DELETE SET NULL;
+
+CREATE TABLE IF NOT EXISTS worksites (
+    id VARCHAR(36) PRIMARY KEY,
+    worker_id VARCHAR(36) NOT NULL REFERENCES workers(id) ON DELETE CASCADE,
+    employer_id VARCHAR(36) REFERENCES employers(id) ON DELETE SET NULL,
+    name VARCHAR(255) NOT NULL,
+    address VARCHAR(500),
+    created_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_worksites_worker_id ON worksites (worker_id);
+CREATE INDEX IF NOT EXISTS ix_worksites_employer_id ON worksites (employer_id);
+
+-- Work entries can optionally be associated with a job site.
+ALTER TABLE work_entries ADD COLUMN IF NOT EXISTS worksite_id VARCHAR(36) REFERENCES worksites(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS ix_work_entries_worksite_id ON work_entries (worksite_id);
+
+CREATE TABLE IF NOT EXISTS wage_agreements (
+    id VARCHAR(36) PRIMARY KEY,
+    worker_id VARCHAR(36) NOT NULL REFERENCES workers(id) ON DELETE CASCADE,
+    employer_id VARCHAR(36) NOT NULL REFERENCES employers(id) ON DELETE CASCADE,
+    worksite_id VARCHAR(36) REFERENCES worksites(id) ON DELETE SET NULL,
+    wage_basis VARCHAR(10) NOT NULL CHECK (wage_basis IN ('daily', 'hourly')),
+    daily_rate NUMERIC(15, 2) CHECK (daily_rate IS NULL OR daily_rate > 0),
+    hourly_rate NUMERIC(15, 2) CHECK (hourly_rate IS NULL OR hourly_rate > 0),
+    overtime_multiplier NUMERIC(4, 2) NOT NULL DEFAULT 1.5 CHECK (overtime_multiplier BETWEEN 1 AND 3),
+    effective_from DATE NOT NULL,
+    effective_to DATE,
+    terms TEXT,
+    created_at TIMESTAMPTZ NOT NULL,
+    CONSTRAINT ck_wage_agreements_effective_period CHECK (effective_to IS NULL OR effective_to >= effective_from),
+    CONSTRAINT ck_wage_agreements_rate_matches_basis CHECK (
+        (wage_basis = 'daily' AND daily_rate IS NOT NULL) OR
+        (wage_basis = 'hourly' AND hourly_rate IS NOT NULL)
+    )
+);
+CREATE INDEX IF NOT EXISTS ix_wage_agreements_worker_id ON wage_agreements (worker_id);
+CREATE INDEX IF NOT EXISTS ix_wage_agreements_employer_id ON wage_agreements (employer_id);
+CREATE INDEX IF NOT EXISTS ix_wage_agreements_worksite_id ON wage_agreements (worksite_id);
+
+CREATE TABLE IF NOT EXISTS wage_calculations (
+    id VARCHAR(36) PRIMARY KEY,
+    worker_id VARCHAR(36) NOT NULL REFERENCES workers(id) ON DELETE CASCADE,
+    work_entry_id VARCHAR(36) NOT NULL UNIQUE REFERENCES work_entries(id) ON DELETE CASCADE,
+    base_amount NUMERIC(15, 2) NOT NULL CHECK (base_amount >= 0),
+    overtime_amount NUMERIC(15, 2) NOT NULL CHECK (overtime_amount >= 0),
+    total_amount NUMERIC(15, 2) NOT NULL CHECK (total_amount >= 0),
+    formula_version VARCHAR(30) NOT NULL DEFAULT 'decimal-v1',
+    created_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_wage_calculations_worker_id ON wage_calculations (worker_id);
+
+CREATE TABLE IF NOT EXISTS worker_preferences (
+    id VARCHAR(36) PRIMARY KEY,
+    worker_id VARCHAR(36) NOT NULL UNIQUE REFERENCES workers(id) ON DELETE CASCADE,
+    theme VARCHAR(10) NOT NULL DEFAULT 'system' CHECK (theme IN ('light', 'dark', 'system')),
+    audio_retention_consent BOOLEAN NOT NULL DEFAULT FALSE,
+    voice_response_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    timezone VARCHAR(64) NOT NULL DEFAULT 'Asia/Kolkata',
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS voice_generation_history (
+    id VARCHAR(36) PRIMARY KEY,
+    worker_id VARCHAR(36) NOT NULL REFERENCES workers(id) ON DELETE CASCADE,
+    source_statement_id VARCHAR(36) REFERENCES voice_statements(id) ON DELETE SET NULL,
+    text_input TEXT NOT NULL,
+    language VARCHAR(20) NOT NULL,
+    model_id VARCHAR(60) NOT NULL,
+    voice_id VARCHAR(100) NOT NULL,
+    status VARCHAR(12) NOT NULL CHECK (status IN ('success', 'failed')),
+    latency_ms NUMERIC(10, 0) CHECK (latency_ms IS NULL OR latency_ms >= 0),
+    audio_reference VARCHAR(500),
+    audio_retention_consent BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_voice_generation_history_worker_id ON voice_generation_history (worker_id);
+
+CREATE TABLE IF NOT EXISTS reminder_preferences (
+    id VARCHAR(36) PRIMARY KEY,
+    worker_id VARCHAR(36) NOT NULL UNIQUE REFERENCES workers(id) ON DELETE CASCADE,
+    consent_given BOOLEAN NOT NULL DEFAULT FALSE,
+    daily_work_entry BOOLEAN NOT NULL DEFAULT FALSE,
+    unconfirmed_record BOOLEAN NOT NULL DEFAULT FALSE,
+    weekly_summary BOOLEAN NOT NULL DEFAULT FALSE,
+    monthly_statement BOOLEAN NOT NULL DEFAULT FALSE,
+    payment_follow_up BOOLEAN NOT NULL DEFAULT FALSE,
+    reminder_time VARCHAR(5) NOT NULL DEFAULT '18:00',
+    timezone VARCHAR(64) NOT NULL DEFAULT 'Asia/Kolkata',
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS reminders (
+    id VARCHAR(36) PRIMARY KEY,
+    worker_id VARCHAR(36) NOT NULL REFERENCES workers(id) ON DELETE CASCADE,
+    reminder_type VARCHAR(40) NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    scheduled_at TIMESTAMPTZ NOT NULL,
+    status VARCHAR(12) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'delivered', 'dismissed')),
+    source_record_id VARCHAR(36),
+    delivered_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_reminders_worker_id ON reminders (worker_id);
+CREATE INDEX IF NOT EXISTS ix_reminders_worker_schedule ON reminders (worker_id, scheduled_at);
+
+CREATE TABLE IF NOT EXISTS savings_goals (
+    id VARCHAR(36) PRIMARY KEY,
+    worker_id VARCHAR(36) NOT NULL REFERENCES workers(id) ON DELETE CASCADE,
+    name VARCHAR(120) NOT NULL,
+    target_amount NUMERIC(15, 2) NOT NULL CHECK (target_amount > 0),
+    target_date DATE,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_savings_goals_worker_id ON savings_goals (worker_id);

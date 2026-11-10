@@ -12,9 +12,9 @@ export default function TranscriptCard({ transcript, language }: TranscriptCardP
   if (!transcript) return null;
 
   return (
-    <section className="my-3 rounded-2xl border border-[#dce5d8] bg-[#f4f7f0] p-4 text-left sm:p-5" aria-label="मूल आवाज़ का लेखा">
+    <section className="my-3 rounded-2xl border border-[#e4e4e7] bg-[#f4f4f5] p-4 text-left sm:p-5" aria-label="मूल आवाज़ का लेखा">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="flex items-center gap-2 text-sm font-extrabold text-[#285c3d]">
+        <span className="flex items-center gap-2 text-sm font-extrabold text-[#52525b]">
           <MessageSquare className="w-4 h-4" />
           आपकी मूल बात
         </span>

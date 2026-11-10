@@ -4,6 +4,7 @@ All queries are filtered by the authenticated worker_id for data isolation.
 """
 
 from datetime import datetime, timezone, timedelta
+from decimal import Decimal
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -14,6 +15,7 @@ from app.database.connection import get_db
 from app.models.models import AuditEvent, Employer, WorkEntry, Payment, PaymentAllocation
 from app.schemas.ledger import (
     AuditEventResponse,
+    AttendanceDay,
     LedgerSummary,
     LedgerAlertResponse,
     PaymentCreate,
@@ -107,6 +109,8 @@ async def list_work_entries(
             worker_id=e.worker_id,
             employer_id=e.employer_id,
             employer_name=emp_map.get(e.employer_id) if e.employer_id else None,
+            worksite_id=e.worksite_id,
+            worksite_name=e.worksite.name if e.worksite else None,
             work_date=e.work_date,
             days_worked=e.days_worked,
             hours_worked=e.hours_worked,
@@ -141,6 +145,8 @@ async def create_work_entry(
         worker_id=entry.worker_id,
         employer_id=entry.employer_id,
         employer_name=emp_map.get(entry.employer_id) if entry.employer_id else None,
+        worksite_id=entry.worksite_id,
+        worksite_name=entry.worksite.name if entry.worksite else None,
         work_date=entry.work_date,
         days_worked=entry.days_worked,
         hours_worked=entry.hours_worked,
@@ -156,6 +162,85 @@ async def create_work_entry(
         source_statement_id=entry.source_statement_id,
         created_at=entry.created_at,
     )
+
+
+@router.put("/work/{entry_id}", response_model=WorkEntryResponse)
+async def correct_work_entry(
+    entry_id: str,
+    body: WorkEntryCreate,
+    worker_id: str = Depends(get_current_worker_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Correct a worker-owned diary record with a fresh calculation and audit event."""
+    entry = await LedgerService.update_work_entry(db, worker_id, entry_id, body)
+    emp_map = await _get_employer_map(db, worker_id)
+    allocated = await db.scalar(
+        select(func.coalesce(func.sum(PaymentAllocation.amount), 0)).where(
+            PaymentAllocation.worker_id == worker_id,
+            PaymentAllocation.work_entry_id == entry.id,
+        )
+    )
+    allocated_amount = Decimal(str(allocated or 0))
+    return WorkEntryResponse(
+        id=entry.id,
+        worker_id=entry.worker_id,
+        employer_id=entry.employer_id,
+        employer_name=emp_map.get(entry.employer_id) if entry.employer_id else None,
+        worksite_id=entry.worksite_id,
+        worksite_name=entry.worksite.name if entry.worksite else None,
+        work_date=entry.work_date,
+        days_worked=entry.days_worked,
+        hours_worked=entry.hours_worked,
+        daily_wage=entry.daily_wage,
+        wage_basis=entry.wage_basis,
+        hourly_rate=entry.hourly_rate,
+        overtime_hours=entry.overtime_hours,
+        overtime_multiplier=entry.overtime_multiplier,
+        total_earned=entry.total_earned,
+        allocated_amount=allocated_amount,
+        outstanding_amount=max(entry.total_earned - allocated_amount, Decimal("0.00")),
+        description=entry.description,
+        source_statement_id=entry.source_statement_id,
+        created_at=entry.created_at,
+    )
+
+
+@router.get("/calendar", response_model=List[AttendanceDay])
+async def get_attendance_calendar(
+    year: int = Query(..., ge=2000, le=2100),
+    month: int = Query(..., ge=1, le=12),
+    employer_id: Optional[str] = Query(None),
+    worker_id: str = Depends(get_current_worker_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Summarize actual recorded work entries for one calendar month."""
+    if employer_id:
+        await LedgerService._validate_employer(db, worker_id, employer_id)
+    start = datetime(year, month, 1, tzinfo=timezone.utc)
+    end = datetime(year + (month == 12), 1 if month == 12 else month + 1, 1, tzinfo=timezone.utc)
+    result = await db.execute(
+        select(WorkEntry).where(
+            WorkEntry.worker_id == worker_id,
+            WorkEntry.work_date >= start,
+            WorkEntry.work_date < end,
+            *([WorkEntry.employer_id == employer_id] if employer_id else []),
+        ).order_by(WorkEntry.work_date)
+    )
+    grouped: dict = {}
+    for entry in result.scalars().all():
+        day = entry.work_date.date()
+        totals = grouped.setdefault(day, {
+            "date": day,
+            "recorded_entries": 0,
+            "total_days_worked": Decimal("0.00"),
+            "total_hours_worked": Decimal("0.00"),
+            "total_earned": Decimal("0.00"),
+        })
+        totals["recorded_entries"] += 1
+        totals["total_days_worked"] += entry.days_worked or Decimal("0")
+        totals["total_hours_worked"] += entry.hours_worked or Decimal("0")
+        totals["total_earned"] += entry.total_earned or Decimal("0")
+    return [AttendanceDay(**grouped[day]) for day in sorted(grouped)]
 
 
 @router.get("/payments", response_model=List[PaymentResponse])

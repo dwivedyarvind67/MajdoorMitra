@@ -11,7 +11,30 @@ import type {
   VoiceConfirmation,
   VoiceReplyResponse,
   WorkEntry,
+  AttendanceDay,
+  WageAgreement,
+  Worksite,
+  EvidenceFileRecord,
+  FinancialInsights,
+  SavingsGoal,
+  AssistanceResource,
+  AssistanceFaq,
+  PaymentRequestDraft,
 } from '../types';
+
+type WorkEntryInput = {
+  work_date: string;
+  days_worked: number | string;
+  daily_wage?: number | string;
+  hours_worked?: number | string;
+  wage_basis?: 'daily' | 'hourly';
+  hourly_rate?: number | string;
+  overtime_hours?: number | string;
+  overtime_multiplier?: number | string;
+  employer_id?: string;
+  worksite_id?: string;
+  description?: string;
+};
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -29,6 +52,51 @@ export type VoiceCorrections = {
   payment_type?: 'cash' | 'upi' | 'bank' | 'advance' | 'other' | null;
   employer_name?: string | null;
   description?: string | null;
+};
+
+export type SpeechVoice = {
+  id: string;
+  gender: string;
+  persona: string;
+  description: string;
+  languages: string[] | 'all';
+};
+
+export type VoiceCapabilities = {
+  languages: Array<{ code: string; short_code: string; name: string; english_name: string }>;
+  prisma: { model: string; configured: boolean; account_verification: string; languages: string[]; auto_detect: boolean; code_switching: { supported: boolean; format: string; max_languages: number } };
+  timbre: {
+    configured: boolean;
+    v3_account_verification: string;
+    models: Array<{ id: string; languages: string[]; voices: SpeechVoice[]; audio_tags: boolean }>;
+    audio_tags: string[];
+    speed: { min: number; max: number; default: number };
+  };
+  evon: { configured: boolean | null; access: string; reason: string; languages: string[] };
+};
+
+export type VoiceGeneration = {
+  id: string;
+  text: string;
+  language: string;
+  model_id: string;
+  voice_id: string;
+  status: 'success' | 'failed';
+  latency_ms: number;
+  audio_base64?: string;
+  audio_content_type?: string;
+  created_at: string;
+};
+
+export type VoiceHistoryItem = {
+  id: string;
+  text_input: string;
+  language: string;
+  model_id: string;
+  voice_id: string;
+  status: string;
+  latency_ms?: number | null;
+  created_at: string;
 };
 
 class ApiClient {
@@ -186,6 +254,36 @@ class ApiClient {
     );
   }
 
+  async getVoiceCapabilities() {
+    return this.request<VoiceCapabilities>('/api/voice/capabilities');
+  }
+
+  async generateStudioSpeech(data: {
+    text: string;
+    model_id: string;
+    voice_id: string;
+    language: string;
+    speed: number;
+  }) {
+    return this.request<VoiceGeneration>('/api/voice/studio/generate', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getVoiceHistory() {
+    return this.request<VoiceHistoryItem[]>('/api/voice/studio/history');
+  }
+
+  async deleteVoiceHistory(id: string) {
+    const token = this.getToken();
+    const response = await fetch(`${API_BASE}/api/voice/studio/history/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!response.ok) throw new Error(await this.getErrorMessage(response));
+  }
+
   // Ledger
   async getLedgerSummary(params?: { employer_id?: string; start_date?: string; end_date?: string }) {
     const query = new URLSearchParams();
@@ -197,26 +295,33 @@ class ApiClient {
     return this.request<LedgerSummary>(`/api/ledger/summary${qs}`);
   }
 
-  async getWorkEntries() {
-    return this.request<WorkEntry[]>('/api/ledger/work');
+  async getWorkEntries(filters?: { start_date?: string; end_date?: string; employer_id?: string }) {
+    const query = new URLSearchParams();
+    if (filters?.start_date) query.set('start_date', filters.start_date);
+    if (filters?.end_date) query.set('end_date', filters.end_date);
+    if (filters?.employer_id) query.set('employer_id', filters.employer_id);
+    const queryString = query.toString();
+    return this.request<WorkEntry[]>(`/api/ledger/work${queryString ? `?${queryString}` : ''}`);
   }
 
-  async addWorkEntry(data: {
-    work_date: string;
-    days_worked: number | string;
-    daily_wage?: number | string;
-    hours_worked?: number | string;
-    wage_basis?: 'daily' | 'hourly';
-    hourly_rate?: number | string;
-    overtime_hours?: number | string;
-    overtime_multiplier?: number | string;
-    employer_id?: string;
-    description?: string;
-  }) {
+  async addWorkEntry(data: WorkEntryInput) {
     return this.request<WorkEntry>('/api/ledger/work', {
       method: 'POST',
       body: JSON.stringify(data),
     });
+  }
+
+  async updateWorkEntry(id: string, data: WorkEntryInput) {
+    return this.request<WorkEntry>(`/api/ledger/work/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getAttendanceCalendar(year: number, month: number, employerId?: string) {
+    const query = new URLSearchParams({ year: String(year), month: String(month) });
+    if (employerId) query.set('employer_id', employerId);
+    return this.request<AttendanceDay[]>(`/api/ledger/calendar?${query}`);
   }
 
   async getPayments() {
@@ -277,6 +382,42 @@ class ApiClient {
     });
   }
 
+  async getWorksites(employerId: string) {
+    return this.request<Worksite[]>(`/api/employers/${encodeURIComponent(employerId)}/worksites`);
+  }
+
+  async addWorksite(employerId: string, data: { name: string; address?: string }) {
+    return this.request<Worksite>(`/api/employers/${encodeURIComponent(employerId)}/worksites`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getWageAgreements(employerId: string, worksiteId?: string) {
+    const query = new URLSearchParams();
+    if (worksiteId) query.set('worksite_id', worksiteId);
+    const queryString = query.toString();
+    return this.request<WageAgreement[]>(
+      `/api/employers/${encodeURIComponent(employerId)}/agreements${queryString ? `?${queryString}` : ''}`,
+    );
+  }
+
+  async addWageAgreement(employerId: string, data: {
+    worksite_id?: string;
+    wage_basis: 'daily' | 'hourly';
+    daily_rate?: number | string;
+    hourly_rate?: number | string;
+    overtime_multiplier?: number | string;
+    effective_from: string;
+    effective_to?: string;
+    terms?: string;
+  }) {
+    return this.request<WageAgreement>(`/api/employers/${encodeURIComponent(employerId)}/agreements`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   // Statements
   async getStatements() {
     return this.request<StatementListItem[]>('/api/statements');
@@ -288,6 +429,86 @@ class ApiClient {
 
   downloadStatementPdf(id: string): Promise<Blob> {
     return this.requestBlob(`/api/statements/${encodeURIComponent(id)}/pdf`);
+  }
+
+  downloadLedgerStatement(filters: { start_date?: string; end_date?: string; employer_id?: string }): Promise<Blob> {
+    const query = new URLSearchParams();
+    if (filters.start_date) query.set('start_date', filters.start_date);
+    if (filters.end_date) query.set('end_date', filters.end_date);
+    if (filters.employer_id) query.set('employer_id', filters.employer_id);
+    return this.requestBlob(`/api/statements/export${query.toString() ? `?${query.toString()}` : ''}`);
+  }
+
+  async getEvidence() {
+    return this.request<EvidenceFileRecord[]>('/api/evidence');
+  }
+
+  async uploadEvidence(data: {
+    file: File;
+    document_type: 'payment_receipt' | 'wage_agreement' | 'work_document' | 'audio' | 'other';
+    statement_id?: string;
+    work_entry_id?: string;
+    payment_id?: string;
+  }) {
+    const form = new FormData();
+    form.append('file', data.file);
+    form.append('consent_given', 'true');
+    form.append('document_type', data.document_type);
+    if (data.statement_id) form.append('statement_id', data.statement_id);
+    if (data.work_entry_id) form.append('work_entry_id', data.work_entry_id);
+    if (data.payment_id) form.append('payment_id', data.payment_id);
+    return this.request<EvidenceFileRecord>('/api/evidence', { method: 'POST', body: form });
+  }
+
+  async getEvidencePreview(id: string) {
+    return this.requestBlob(`/api/evidence/${encodeURIComponent(id)}/preview`);
+  }
+
+  async downloadEvidence(id: string) {
+    return this.requestBlob(`/api/evidence/${encodeURIComponent(id)}/download`);
+  }
+
+  async deleteEvidence(id: string) {
+    const token = this.getToken();
+    const response = await fetch(`${API_BASE}/api/evidence/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!response.ok) throw new Error(await this.getErrorMessage(response));
+  }
+
+  async getFinancialInsights(months: number = 6) {
+    return this.request<FinancialInsights>(`/api/insights?months=${months}`);
+  }
+
+  async getSavingsGoals() {
+    return this.request<SavingsGoal[]>('/api/insights/savings-goals');
+  }
+
+  async createSavingsGoal(data: { name: string; target_amount: string; target_date?: string }) {
+    return this.request<SavingsGoal>('/api/insights/savings-goals', {
+      method: 'POST', body: JSON.stringify(data),
+    });
+  }
+
+  async updateSavingsGoal(id: string, active: boolean) {
+    return this.request<SavingsGoal>(`/api/insights/savings-goals/${encodeURIComponent(id)}`, {
+      method: 'PATCH', body: JSON.stringify({ active }),
+    });
+  }
+
+  async getAssistanceResources() {
+    return this.request<AssistanceResource[]>('/api/assistance/resources');
+  }
+
+  async getAssistanceFaqs() {
+    return this.request<{ items: AssistanceFaq[]; disclaimer: string }>('/api/assistance/faqs');
+  }
+
+  async createPaymentRequestDraft(employerId?: string, language: 'hi' | 'en' = 'hi') {
+    const query = new URLSearchParams({ language });
+    if (employerId) query.set('employer_id', employerId);
+    return this.request<PaymentRequestDraft>(`/api/assistance/payment-request?${query.toString()}`);
   }
 }
 

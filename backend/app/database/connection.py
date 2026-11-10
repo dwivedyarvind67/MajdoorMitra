@@ -76,6 +76,8 @@ def upgrade_schema(connection) -> None:
     Base.metadata.create_all(connection)
     _add_confirmed_at_if_missing(connection)
     _add_work_financial_columns_if_missing(connection)
+    _add_worksite_link_if_missing(connection)
+    _add_evidence_columns_if_missing(connection)
 
 
 def _add_confirmed_at_if_missing(connection) -> None:
@@ -121,3 +123,37 @@ def _add_work_financial_columns_if_missing(connection) -> None:
                 connection.execute(
                     text(f"ALTER TABLE work_entries ADD CONSTRAINT {name} CHECK ({expression})")
                 )
+
+
+def _add_evidence_columns_if_missing(connection) -> None:
+    """Extend existing evidence metadata without changing or discarding stored rows."""
+    inspector = inspect(connection)
+    if "evidence_files" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("evidence_files")}
+    is_postgres = connection.dialect.name == "postgresql"
+    additions = {
+        "content_type": "VARCHAR(127)",
+        "file_name": "VARCHAR(255)",
+        "size_bytes": "BIGINT",
+        "checksum_sha256": "VARCHAR(64)",
+        "consent_given": f"BOOLEAN NOT NULL DEFAULT {'FALSE' if is_postgres else '0'}",
+        "work_entry_id": "VARCHAR(36) REFERENCES work_entries(id) ON DELETE SET NULL",
+        "payment_id": "VARCHAR(36) REFERENCES payments(id) ON DELETE SET NULL",
+    }
+    for name, definition in additions.items():
+        if name not in columns:
+            connection.execute(text(f"ALTER TABLE evidence_files ADD COLUMN {name} {definition}"))
+
+
+def _add_worksite_link_if_missing(connection) -> None:
+    """Add the optional site reference to pre-existing work records."""
+    inspector = inspect(connection)
+    if "work_entries" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("work_entries")}
+    if "worksite_id" not in columns:
+        connection.execute(text(
+            "ALTER TABLE work_entries ADD COLUMN worksite_id VARCHAR(36) "
+            "REFERENCES worksites(id) ON DELETE SET NULL"
+        ))

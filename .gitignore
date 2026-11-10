@@ -38,10 +38,12 @@ Thumbs.db
 .coverage
 htmlcov/
 .pytest_cache/
+preview-*.log
 
 # Generated
 *.pdf
 uploads/
+backend/.private-evidence/
 
 # Database
 *.db

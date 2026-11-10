@@ -1,6 +1,7 @@
 """Authenticated voice-recording, clarification, confirmation, and speech routes."""
 
 import base64
+import time
 import uuid
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
@@ -10,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.connection import get_db
-from app.models.models import Employer, Payment, StatementStatus, VoiceStatement, WorkEntry
+from app.models.models import Employer, Payment, StatementStatus, VoiceGenerationHistory, VoiceStatement, WorkEntry
 from app.schemas.ledger import PaymentCreate, WorkEntryCreate
 from app.schemas.voice import (
     ConfirmResponse,
@@ -24,6 +25,9 @@ from app.schemas.voice import (
     TranscriptionResponse,
     VoiceSessionCreate,
     VoiceSessionResponse,
+    VoiceStudioRequest,
+    VoiceStudioResponse,
+    VoiceGenerationHistoryItem,
 )
 from app.services.conversation_service import get_conversation_service
 from app.services.audit_service import AuditService
@@ -32,6 +36,7 @@ from app.services.extraction_service import get_extraction_service
 from app.services.ledger_service import LedgerService
 from app.services.prisma_service import ConfigurationError, TranscriptionError, get_prisma_service
 from app.services.timbre_service import TTSError, get_timbre_service
+from app.services.voice_capabilities import get_capabilities
 from app.utils.auth import get_current_worker_id
 
 router = APIRouter(prefix="/api/voice", tags=["voice"])
@@ -41,6 +46,146 @@ EDITABLE_FIELDS = {
     "hourly_rate", "overtime_hours", "overtime_multiplier", "work_date",
     "amount_received", "payment_type", "employer_name", "description",
 }
+
+
+@router.get("/capabilities")
+async def voice_capabilities(worker_id: str = Depends(get_current_worker_id)):
+    """Return provider-specific language, model, and voice support."""
+    return get_capabilities()
+
+
+@router.post("/studio/generate", response_model=VoiceStudioResponse)
+async def generate_studio_speech(
+    body: VoiceStudioRequest,
+    worker_id: str = Depends(get_current_worker_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate actual Timbre audio and persist its worker-owned history metadata."""
+    capabilities = get_capabilities()
+    model = next((item for item in capabilities["timbre"]["models"] if item["id"] == body.model_id), None)
+    voice = next((item for item in model["voices"] if item["id"] == body.voice_id), None) if model else None
+    if not voice:
+        raise HTTPException(status_code=422, detail="Choose a voice published for the selected speech model.")
+    if body.language == "hi-en":
+        raise HTTPException(status_code=422, detail="Hinglish is documented for another voice; that account/model combination has not been verified in this app yet.")
+    if body.language == "auto" and body.model_id != "timbre-v3.0":
+        raise HTTPException(status_code=422, detail="Automatic language detection is available here with Timbre v3.0.")
+    if isinstance(voice["languages"], list) and body.language != "auto" and body.language not in voice["languages"]:
+        raise HTTPException(status_code=422, detail="This Timbre v2.5 voice is optimized for a different language. Choose a matching language or a v3.0 voice.")
+
+    if body.source_statement_id:
+        source = await db.execute(select(VoiceStatement.id).where(
+            VoiceStatement.id == body.source_statement_id,
+            VoiceStatement.worker_id == worker_id,
+            VoiceStatement.status == StatementStatus.CONFIRMED,
+        ))
+        if source.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="The confirmed voice record was not found.")
+
+    generation_id = str(uuid.uuid4())
+    started = time.perf_counter()
+    try:
+        audio = await get_timbre_service().speak(
+            body.text,
+            language=body.language,
+            model=body.model_id,
+            voice=body.voice_id,
+            speed=float(body.speed),
+        )
+        latency_ms = round((time.perf_counter() - started) * 1000)
+    except ConfigurationError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except TTSError as exc:
+        latency_ms = round((time.perf_counter() - started) * 1000)
+        db.add(VoiceGenerationHistory(
+            id=generation_id,
+            worker_id=worker_id,
+            source_statement_id=body.source_statement_id,
+            text_input=body.text,
+            language=body.language,
+            model_id=body.model_id,
+            voice_id=body.voice_id,
+            status="failed",
+            latency_ms=latency_ms,
+            audio_retention_consent=False,
+        ))
+        await db.commit()
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Timbre could not generate audio. Your text and earlier records are safe; please retry.") from exc
+
+    generated_at = datetime.now(timezone.utc)
+    db.add(VoiceGenerationHistory(
+        id=generation_id,
+        worker_id=worker_id,
+        source_statement_id=body.source_statement_id,
+        text_input=body.text,
+        language=body.language,
+        model_id=body.model_id,
+        voice_id=body.voice_id,
+        status="success",
+        latency_ms=latency_ms,
+        audio_retention_consent=False,
+    ))
+    await db.commit()
+    return VoiceStudioResponse(
+        id=generation_id,
+        text=body.text,
+        language=body.language,
+        model_id=body.model_id,
+        voice_id=body.voice_id,
+        status="success",
+        latency_ms=latency_ms,
+        audio_base64=base64.b64encode(audio).decode("ascii"),
+        audio_content_type="audio/wav",
+        created_at=generated_at,
+    )
+
+
+@router.get("/studio/history", response_model=list[VoiceGenerationHistoryItem])
+async def get_studio_history(
+    limit: int = 30,
+    worker_id: str = Depends(get_current_worker_id),
+    db: AsyncSession = Depends(get_db),
+):
+    if limit < 1 or limit > 100:
+        raise HTTPException(status_code=422, detail="History limit must be between 1 and 100.")
+    result = await db.execute(
+        select(VoiceGenerationHistory)
+        .where(VoiceGenerationHistory.worker_id == worker_id)
+        .order_by(VoiceGenerationHistory.created_at.desc())
+        .limit(limit)
+    )
+    return [
+        VoiceGenerationHistoryItem(
+            id=row.id,
+            text_input=row.text_input,
+            language=row.language,
+            model_id=row.model_id,
+            voice_id=row.voice_id,
+            status=row.status,
+            latency_ms=int(row.latency_ms) if row.latency_ms is not None else None,
+            created_at=row.created_at,
+        )
+        for row in result.scalars().all()
+    ]
+
+
+@router.delete("/studio/history/{generation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_studio_history(
+    generation_id: str,
+    worker_id: str = Depends(get_current_worker_id),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(VoiceGenerationHistory).where(
+        VoiceGenerationHistory.id == generation_id,
+        VoiceGenerationHistory.worker_id == worker_id,
+    ))
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Voice history was not found.")
+    AuditService.record(db, worker_id, "voice.studio_history_deleted", "voice_generation", row.id, details={"status": row.status})
+    await db.delete(row)
+    await db.commit()
+    return None
 
 
 @router.post("/sessions", response_model=VoiceSessionResponse, status_code=status.HTTP_201_CREATED)
@@ -429,7 +574,12 @@ async def speak_summary(
             dict(statement.extracted_data or {}), statement.language
         )
     try:
-        audio = await get_timbre_service().speak(text, statement.language)
+        if statement.language == "hinglish":
+            audio = await get_timbre_service().speak(
+                text, language="auto", model="timbre-v3.0", voice="Shivani"
+            )
+        else:
+            audio = await get_timbre_service().speak(text, statement.language)
     except ConfigurationError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except TTSError as exc:

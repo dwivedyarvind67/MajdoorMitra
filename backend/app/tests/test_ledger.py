@@ -8,7 +8,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from app.schemas.ledger import WorkEntryCreate, PaymentCreate, PaymentAllocationCreate
 from app.services.ledger_service import LedgerService
-from app.models.models import Worker, Employer, PaymentAllocation, AuditEvent, VoiceStatement, StatementStatus
+from app.models.models import Worker, Employer, PaymentAllocation, AuditEvent, VoiceStatement, StatementStatus, WageCalculation
 from sqlalchemy import select
 
 
@@ -159,6 +159,12 @@ async def test_hourly_overtime_work_entry_calculation_is_stored(db_session):
     assert entry.total_earned == Decimal("1100.00")
     assert entry.wage_basis == "hourly"
     assert entry.hourly_rate == Decimal("100.00")
+    snapshot = (
+        await db_session.execute(select(WageCalculation).where(WageCalculation.work_entry_id == entry.id))
+    ).scalar_one()
+    assert snapshot.base_amount == Decimal("800.00")
+    assert snapshot.overtime_amount == Decimal("300.00")
+    assert snapshot.total_amount == entry.total_earned
 
 
 @pytest.mark.asyncio

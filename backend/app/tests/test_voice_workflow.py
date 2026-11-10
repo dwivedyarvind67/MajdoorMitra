@@ -232,6 +232,31 @@ async def test_failed_prisma_and_evon_calls_preserve_session_and_ledger(
 
 
 @pytest.mark.asyncio
+async def test_unavailable_local_evon_keeps_transcript_for_retry(client: AsyncClient, auth_token, monkeypatch):
+    from app.api import voice
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "GNANI_EVON_BACKEND", "transformers")
+    monkeypatch.setattr("app.services.evon_service.platform.system", lambda: "Windows")
+    monkeypatch.setattr(voice, "get_prisma_service", lambda: FakePrisma())
+    session_id = await create_session(client, auth_token)
+    uploaded = await client.post(
+        f"/api/voice/sessions/{session_id}/audio",
+        files={"audio": ("recording.wav", WAVE, "audio/wav")},
+        headers=headers(auth_token),
+    )
+    assert uploaded.status_code == 200
+
+    failed_extract = await client.post(f"/api/voice/sessions/{session_id}/extract", headers=headers(auth_token))
+
+    assert failed_extract.status_code == 503
+    detail = (await client.get(f"/api/statements/{session_id}", headers=headers(auth_token))).json()
+    assert detail["status"] == "TRANSCRIBED"
+    assert detail["transcript"] == FakePrisma().transcript
+    assert detail["extracted_data"] is None
+
+
+@pytest.mark.asyncio
 async def test_rejected_draft_cannot_be_confirmed_or_downloaded_as_a_statement(
     client: AsyncClient, auth_token, monkeypatch
 ):
@@ -405,3 +430,63 @@ async def test_manual_duplicate_payments_and_cross_worker_employer_are_rejected(
     other_token = create_access_token({"sub": "not-this-worker"})
     foreign = await client.post("/api/ledger/payments", json=payload, headers=headers(other_token))
     assert foreign.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_voice_capability_registry_is_provider_specific(client: AsyncClient, auth_token):
+    response = await client.get("/api/voice/capabilities", headers=headers(auth_token))
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["prisma"]["languages"]) == 10
+    assert body["prisma"]["code_switching"]["format"] == "codemix"
+    v3 = next(model for model in body["timbre"]["models"] if model["id"] == "timbre-v3.0")
+    assert len(v3["voices"]) == 13
+    assert v3["audio_tags"] is True
+    assert body["evon"]["access"] == "unverified"
+
+
+@pytest.mark.asyncio
+async def test_voice_studio_generates_real_provider_audio_and_worker_owned_history(
+    client: AsyncClient, auth_token, monkeypatch
+):
+    from app.api import voice
+
+    fake = FakeTimbre()
+    monkeypatch.setattr(voice, "get_timbre_service", lambda: fake)
+    response = await client.post(
+        "/api/voice/studio/generate",
+        json={"text": "नमस्ते, आपका हिसाब तैयार है।", "model_id": "timbre-v3.0", "voice_id": "Shivani", "language": "hi-IN", "speed": "1.0"},
+        headers=headers(auth_token),
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+    assert base64.b64decode(data["audio_base64"]) == WAVE + b"spoken-audio"
+    assert data["latency_ms"] >= 0
+
+    history = await client.get("/api/voice/studio/history", headers=headers(auth_token))
+    assert history.status_code == 200
+    assert len(history.json()) == 1
+    assert history.json()[0]["voice_id"] == "Shivani"
+
+    deleted = await client.delete(f"/api/voice/studio/history/{data['id']}", headers=headers(auth_token))
+    assert deleted.status_code == 204
+    assert (await client.get("/api/voice/studio/history", headers=headers(auth_token))).json() == []
+
+
+@pytest.mark.asyncio
+async def test_voice_studio_rejects_unpublished_voice_without_calling_provider(
+    client: AsyncClient, auth_token, monkeypatch
+):
+    from app.api import voice
+
+    async def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("provider must not receive an invalid voice")
+
+    monkeypatch.setattr(voice.get_timbre_service().__class__, "speak", fail_if_called)
+    response = await client.post(
+        "/api/voice/studio/generate",
+        json={"text": "Namaste", "model_id": "timbre-v3.0", "voice_id": "invented", "language": "en-IN"},
+        headers=headers(auth_token),
+    )
+    assert response.status_code == 422

@@ -67,29 +67,30 @@ class ConversationService:
         ambiguities: Optional[List[str]] = None,
     ) -> Optional[str]:
         """Generate the next follow-up question for missing fields."""
+        hindi = language in {"hi", "hinglish"}
         if not missing_fields and ambiguities:
             return (
                 "एक विवरण स्पष्ट नहीं है। कृपया उसे ठीक करके फिर से जाँचें।"
-                if language == "hi"
+                if hindi
                 else "One detail is unclear. Please correct it and review the record again."
             )
         if not missing_fields:
             return None
 
-        questions = self.FOLLOW_UP_QUESTIONS_HI if language == "hi" else self.FOLLOW_UP_QUESTIONS_EN
+        questions = self.FOLLOW_UP_QUESTIONS_HI if hindi else self.FOLLOW_UP_QUESTIONS_EN
 
         # Ask for the first missing field
         field = missing_fields[0]
         if field == "intent":
-            if language == "hi":
+            if hindi:
                 return "क्या आप काम दर्ज करना चाहते हैं या मिला हुआ भुगतान?"
             return "Would you like to record work or a payment received?"
-        return questions.get(field, f"कृपया {field} बताएं।" if language == "hi" else f"Please provide {field}.")
+        return questions.get(field, f"कृपया {field} बताएं।" if hindi else f"Please provide {field}.")
 
     def generate_confirmation_message(self, extracted_data: dict, language: str = "hi") -> str:
         """Generate a summary message for user confirmation."""
         intent = extracted_data.get("intent")
-        hindi = language == "hi"
+        hindi = language in {"hi", "hinglish"}
         lines = ["कृपया इन विवरणों की पुष्टि करें:" if hindi else "Please confirm these details:"]
         employer = extracted_data.get("employer_name")
         work_date = extracted_data.get("work_date")
@@ -110,7 +111,7 @@ class ConversationService:
         intent = extracted_data.get("intent")
         employer = extracted_data.get("employer_name")
         work_date = extracted_data.get("work_date")
-        if language == "hi":
+        if language in {"hi", "hinglish"}:
             lines = ["आपका रिकॉर्ड आपकी पुष्टि के बाद सुरक्षित कर लिया गया है।"]
             if employer:
                 lines.append(f"ठेकेदार: {employer}")

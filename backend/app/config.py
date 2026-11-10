@@ -35,15 +35,7 @@ class Settings(BaseSettings):
     GNANI_TIMBRE_API_URL: str = "https://api.vachana.ai/api/v1/tts/inference"
 
     # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:3000"]
-
-    @field_validator("CORS_ORIGINS", mode="before")
-    @classmethod
-    def split_cors_origins(cls, v: object) -> List[str]:
-        """Split comma-separated CORS origins string into a list."""
-        if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",") if origin.strip()]
-        return v  # type: ignore[return-value]
+    CORS_ORIGINS: Any = ["http://localhost:3000"]
 
     model_config = {
         "env_file": ".env",

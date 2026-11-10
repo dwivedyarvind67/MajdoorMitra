@@ -3,7 +3,7 @@ Application configuration using pydantic-settings.
 Loads all environment variables with sensible defaults.
 """
 
-from typing import List
+from typing import Any, List
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
